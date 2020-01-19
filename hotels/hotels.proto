@@ -1,0 +1,19 @@
+syntax = "proto3";
+package hotels;
+
+service Hotels {
+    rpc BookRPC (BookReq) returns (BookReply);
+    rpc CancelRPC (CancelReq) returns (CancelReply);
+}
+
+message BookReq {
+}
+
+message BookReply {
+}
+
+message CancelReq {
+}
+
+message CancelReply {
+}
