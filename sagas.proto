@@ -1,0 +1,15 @@
+syntax = "proto3";
+package sagas;
+
+enum Status {
+    Start = 0;
+    End = 1;
+    Abort = 2;
+}
+
+message Log {
+    uint64 sagaID = 1;
+    string name = 2; 
+    Status status = 3;
+    bytes data = 4;
+}

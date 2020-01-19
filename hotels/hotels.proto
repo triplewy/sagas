@@ -2,18 +2,16 @@ syntax = "proto3";
 package hotels;
 
 service Hotels {
-    rpc BookRPC (BookReq) returns (BookReply);
-    rpc CancelRPC (CancelReq) returns (CancelReply);
+  rpc BookRPC(BookReq) returns (BookReply);
+  rpc CancelRPC(CancelReq) returns (CancelReply);
 }
 
 message BookReq {
+  uint64 userID = 1;
 }
 
-message BookReply {
-}
+message BookReply { uint64 id = 1; }
 
-message CancelReq {
-}
+message CancelReq { uint64 id = 1; }
 
-message CancelReply {
-}
+message CancelReply {}

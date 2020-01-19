@@ -1,6 +1,8 @@
-package sagas
+package utils
 
 import (
+	"math"
+	"math/rand"
 	"net"
 )
 
@@ -15,4 +17,20 @@ func AvailableAddr() string {
 	defer server.Close()
 	// Get the host string in the format "127.0.0.1:4444"
 	return server.Addr().String()
+}
+
+const BaseTimeout = 1
+const MaxTimeout = 10
+
+// Backoff implements an exponential backoff algorithm with jitter.
+// https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
+func Backoff(retries int) int {
+	return rand.Intn(minInt(MaxTimeout, BaseTimeout*int(math.Pow(2, float64(retries))))) + 1
+}
+
+func minInt(x, y int) int {
+	if x < y {
+		return x
+	}
+	return y
 }
