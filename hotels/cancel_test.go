@@ -13,15 +13,15 @@ func TestCancel(t *testing.T) {
 	client := NewClient(addr)
 
 	t.Run("basic", func(t *testing.T) {
-		reply1, err := BookRoom(client, "user0", "room0")
+		id, err := BookRoom(client, "user0", "room0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = CancelRoom(client, "user0", reply1.GetReservationID())
+		err = CancelRoom(client, "user0", id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		value, ok := h.reservations.Get(reply1.GetReservationID())
+		value, ok := h.reservations.Get(id)
 		if !ok {
 			t.Fatal("Expected reservations to have key reservationID but does not exist")
 		}

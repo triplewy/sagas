@@ -40,7 +40,7 @@ func contextWithRequestID(userID string) context.Context {
 	return metadata.NewOutgoingContext(context.Background(), md)
 }
 
-func BookRoom(client HotelsClient, userID, roomID string) (*BookReply, error) {
+func BookRoom(client HotelsClient, userID, roomID string) (string, error) {
 	// Retry RPC until we get valid response
 	ctx := contextWithRequestID(userID)
 	req := &BookReq{
@@ -56,28 +56,28 @@ func BookRoom(client HotelsClient, userID, roomID string) (*BookReply, error) {
 		if err != nil {
 			st := status.Convert(err)
 			if st.Code() != codes.Unavailable && st.Code() != codes.DeadlineExceeded {
-				return nil, err
+				return "", err
 			}
 		}
 	}
-	return reply, nil
+	return reply.GetReservationID(), nil
 }
 
-func CancelRoom(client HotelsClient, userID, reservationID string) (*CancelReply, error) {
+func CancelRoom(client HotelsClient, userID, reservationID string) error {
 	ctx := contextWithRequestID(userID)
 	req := &CancelReq{ReservationID: reservationID}
-	reply, err := client.CancelRPC(ctx, req)
+	_, err := client.CancelRPC(ctx, req)
 	retries := 0
 	for err != nil {
 		sleep := utils.Backoff(retries)
 		time.Sleep(time.Duration(sleep) * time.Second)
-		reply, err = client.CancelRPC(ctx, req)
+		_, err = client.CancelRPC(ctx, req)
 		if err != nil {
 			st := status.Convert(err)
 			if st.Code() != codes.Unavailable && st.Code() != codes.DeadlineExceeded {
-				return nil, err
+				return err
 			}
 		}
 	}
-	return reply, nil
+	return nil
 }

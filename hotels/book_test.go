@@ -16,22 +16,22 @@ func TestBook(t *testing.T) {
 	client := NewClient(addr)
 
 	t.Run("basic", func(t *testing.T) {
-		reply, err := BookRoom(client, "user0", "room0")
+		id, err := BookRoom(client, "user0", "room0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if reply.GetReservationID() != "1" {
-			t.Fatalf("Expected: %v, Got: %v\n", "1", reply.GetReservationID())
+		if id != "1" {
+			t.Fatalf("Expected: %v, Got: %v\n", "1", id)
 		}
 	})
 
 	t.Run("blocked network", func(t *testing.T) {
 		errCh := make(chan error, 1)
 
-		h.blockNetwork.Store(true)
+		h.BlockNetwork.Store(true)
 		go func() {
 			time.Sleep(2 * time.Second)
-			h.blockNetwork.Store(false)
+			h.BlockNetwork.Store(false)
 		}()
 
 		go func() {
@@ -49,10 +49,10 @@ func TestBook(t *testing.T) {
 	})
 
 	t.Run("slow network", func(t *testing.T) {
-		h.slowNetwork.Store(true)
+		h.SlowNetwork.Store(true)
 		go func() {
 			time.Sleep(5 * time.Second)
-			h.slowNetwork.Store(false)
+			h.SlowNetwork.Store(false)
 		}()
 
 		_, err := BookRoom(client, "user2", "room2")

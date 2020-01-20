@@ -49,12 +49,12 @@ func serverInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySer
 	}
 
 	// Check if blocking network
-	if h.blockNetwork.Load() {
+	if h.BlockNetwork.Load() {
 		return nil, retryError(ErrNetworkBlocked)
 	}
 
 	// Check if slow network
-	if h.slowNetwork.Load() {
+	if h.SlowNetwork.Load() {
 		// Sleep random time between 2-5s
 		sleep := ClientTimeout + rand.Intn(4)
 		time.Sleep(time.Duration(sleep) * time.Second)

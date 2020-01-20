@@ -26,23 +26,23 @@ const (
 
 type Hotels struct {
 	currID       *atomic.Uint64
-	rooms        cmap.ConcurrentMap
+	Rooms        cmap.ConcurrentMap
 	reservations cmap.ConcurrentMap
 	requests     cmap.ConcurrentMap
 
-	blockNetwork *atomic.Bool
-	slowNetwork  *atomic.Bool
+	BlockNetwork *atomic.Bool
+	SlowNetwork  *atomic.Bool
 }
 
 func NewHotels() *Hotels {
 	return &Hotels{
 		currID:       atomic.NewUint64(0),
-		rooms:        cmap.New(),
+		Rooms:        cmap.New(),
 		reservations: cmap.New(),
 		requests:     cmap.New(),
 
-		blockNetwork: atomic.NewBool(false),
-		slowNetwork:  atomic.NewBool(false),
+		BlockNetwork: atomic.NewBool(false),
+		SlowNetwork:  atomic.NewBool(false),
 	}
 }
 
@@ -52,7 +52,7 @@ func (h *Hotels) newID() string {
 
 func (h *Hotels) BookRPC(ctx context.Context, req *BookReq) (*BookReply, error) {
 	// Check if room has already been booked
-	if value, ok := h.rooms.Get(req.RoomID); ok {
+	if value, ok := h.Rooms.Get(req.RoomID); ok {
 		if bookedUserID, ok := value.(string); ok {
 			// Switch error based on if user has booked room themselves
 			if req.UserID == bookedUserID {
@@ -62,7 +62,7 @@ func (h *Hotels) BookRPC(ctx context.Context, req *BookReq) (*BookReply, error) 
 		}
 		return nil, ErrInvalidMapType
 	}
-	h.rooms.Set(req.RoomID, req.UserID)
+	h.Rooms.Set(req.RoomID, req.UserID)
 
 	// Set reservation to Booked
 	reservationID := h.newID()
