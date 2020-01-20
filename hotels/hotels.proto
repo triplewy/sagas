@@ -7,11 +7,17 @@ service Hotels {
 }
 
 message BookReq {
-  uint64 userID = 1;
+  string userID = 1;
+  string roomID = 2;
 }
 
-message BookReply { uint64 id = 1; }
+message BookReply {
+  string reservationID = 1; 
+}
 
-message CancelReq { uint64 id = 1; }
+message CancelReq {
+  string userID = 1; 
+  string reservationID = 2; 
+}
 
 message CancelReply {}

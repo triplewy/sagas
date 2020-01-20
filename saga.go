@@ -32,7 +32,7 @@ func (s *Sagas) StartSaga() {
 		Status: Status_Start,
 		Data:   []byte{},
 	})
-	// Concurrently call bookHotel and bookFlight
+	// Concurrently call BookRoom and bookFlight
 	go func() {
 		// Persist start of transaction to log
 		s.store.Append(Log{

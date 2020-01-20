@@ -3,14 +3,18 @@ package hotels
 import (
 	context "context"
 	"errors"
-	"sync"
+	"strconv"
 
+	cmap "github.com/orcaman/concurrent-map"
 	"go.uber.org/atomic"
 )
 
+// Errors involving hotel business logic
 var (
-	ErrReservationDoesNotExist = errors.New("Reservation does not exist")
-	ErrNetworkBlocked          = errors.New("network is blocked")
+	ErrRoomAlreadyBooked = errors.New("Room has already been booked by user")
+	ErrRoomUnavailable   = errors.New("Room is unavailable to book")
+	ErrNetworkBlocked    = errors.New("network is blocked")
+	ErrInvalidMapType    = errors.New("invalid value type in map")
 )
 
 type Status int
@@ -22,40 +26,51 @@ const (
 
 type Hotels struct {
 	currID       *atomic.Uint64
+	rooms        cmap.ConcurrentMap
+	reservations cmap.ConcurrentMap
+	requests     cmap.ConcurrentMap
+
 	blockNetwork *atomic.Bool
-	reservations map[uint64]Status
-	sync.Mutex
+	slowNetwork  *atomic.Bool
 }
 
 func NewHotels() *Hotels {
 	return &Hotels{
 		currID:       atomic.NewUint64(0),
+		rooms:        cmap.New(),
+		reservations: cmap.New(),
+		requests:     cmap.New(),
+
 		blockNetwork: atomic.NewBool(false),
-		reservations: make(map[uint64]Status),
+		slowNetwork:  atomic.NewBool(false),
 	}
 }
 
-func (h *Hotels) newID() uint64 {
-	return h.currID.Inc()
+func (h *Hotels) newID() string {
+	return strconv.FormatUint(h.currID.Inc(), 10)
 }
 
 func (h *Hotels) BookRPC(ctx context.Context, req *BookReq) (*BookReply, error) {
-	h.Lock()
-	defer h.Unlock()
-
-	id := h.newID()
-	if _, ok := h.reservations[id]; !ok {
-		h.reservations[id] = Booked
+	// Check if room has already been booked
+	if value, ok := h.rooms.Get(req.RoomID); ok {
+		if bookedUserID, ok := value.(string); ok {
+			// Switch error based on if user has booked room themselves
+			if req.UserID == bookedUserID {
+				return nil, ErrRoomAlreadyBooked
+			}
+			return nil, ErrRoomUnavailable
+		}
+		return nil, ErrInvalidMapType
 	}
+	h.rooms.Set(req.RoomID, req.UserID)
 
-	return &BookReply{Id: id}, nil
+	// Set reservation to Booked
+	reservationID := h.newID()
+	h.reservations.Set(reservationID, Booked)
+	return &BookReply{ReservationID: reservationID}, nil
 }
 
 func (h *Hotels) CancelRPC(ctx context.Context, req *CancelReq) (*CancelReply, error) {
-	h.Lock()
-	defer h.Unlock()
-
-	h.reservations[req.GetId()] = Canceled
-
+	h.reservations.Set(req.GetReservationID(), Canceled)
 	return &CancelReply{}, nil
 }
