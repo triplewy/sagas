@@ -1,7 +1,6 @@
 package sagas
 
 import (
-	"log"
 	"os/exec"
 	"testing"
 	"time"
@@ -12,24 +11,24 @@ import (
 	"github.com/triplewy/sagas/hotels"
 )
 
-func TestSagasBasic(t *testing.T) {
+func TestCoordinatorBasic(t *testing.T) {
 	config := DefaultConfig()
 
 	server, _ := hotels.NewServer(config.HotelsAddr)
 	hClient := hotels.NewClient(config.HotelsAddr)
 	defer server.GracefulStop()
 
-	s := NewSagas(config)
-	defer s.Cleanup()
+	c := NewCoordinator(config)
+	defer c.Cleanup()
 
 	t.Run("1 transaction", func(t *testing.T) {
 		t.Run("success", func(t *testing.T) {
-			s.StartSaga("user0", "room0")
-			index := s.LastIndex()
+			c.StartSaga("user0", "room0")
+			index := c.LastIndex()
 			if index != 4 {
 				t.Fatalf("Expected: %d, Got: %d\n", 4, index)
 			}
-			log, err := s.GetLog(index)
+			log, err := c.GetLog(index)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,9 +53,9 @@ func TestSagasBasic(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s.StartSaga("user1", "room1")
-			index := s.LastIndex()
-			log, err := s.GetLog(index - 1)
+			c.StartSaga("user1", "room1")
+			index := c.LastIndex()
+			log, err := c.GetLog(index - 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -68,7 +67,7 @@ func TestSagasBasic(t *testing.T) {
 	})
 }
 
-func TestSagasCoordinatorFailure(t *testing.T) {
+func TestCoordinatorCoordinatorFailure(t *testing.T) {
 	config := DefaultConfig()
 	server, h := hotels.NewServer(config.HotelsAddr)
 	defer server.GracefulStop()
@@ -93,10 +92,24 @@ func TestSagasCoordinatorFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			s := NewSagas(config)
-			defer s.Cleanup()
+			// Check if reservation failed
+			if _, ok := h.Rooms.Get("room2"); ok {
+				t.Fatal("Expected rooms to not have key 'room2' but has key")
+			}
 
-			log.Println(s.LastIndex())
+			c := NewCoordinator(config)
+			defer c.Cleanup()
+
+			lastLog, err := c.GetLog(c.LastIndex())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Check if last log is start log for hotel
+			if lastLog.Name != "hotel" || lastLog.Status != Start {
+				t.Fatalf("Got incorrect log: %v\n", lastLog)
+			}
+
 		})
 
 		t.Run("after rpc", func(t *testing.T) {

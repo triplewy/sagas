@@ -18,6 +18,6 @@ func main() {
 	flag.Parse()
 
 	config := sagas.DefaultConfig()
-	s := sagas.NewSagas(config)
+	s := sagas.NewCoordinator(config)
 	s.StartSaga(userID, roomID)
 }

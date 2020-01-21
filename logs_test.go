@@ -4,7 +4,7 @@ import "testing"
 
 func TestLog(t *testing.T) {
 	config := DefaultConfig()
-	s := NewSagas(config)
+	s := NewCoordinator(config)
 	defer s.Cleanup()
 
 	index := s.LastIndex()

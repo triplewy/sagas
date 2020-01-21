@@ -6,13 +6,15 @@ import (
 )
 
 type Config struct {
-	Path       string
-	HotelsAddr string
+	Path        string
+	HotelsAddr  string
+	AutoRecover bool
 }
 
 func DefaultConfig() *Config {
 	return &Config{
-		Path:       filepath.Join(os.TempDir(), "sagas"),
-		HotelsAddr: "localhost:50051",
+		Path:        filepath.Join(os.TempDir(), "sagas"),
+		HotelsAddr:  "localhost:50051",
+		AutoRecover: true,
 	}
 }

@@ -11,13 +11,11 @@ message BookReq {
   string roomID = 2;
 }
 
-message BookReply {
-  string reservationID = 1; 
-}
+message BookReply { string reservationID = 1; }
 
 message CancelReq {
-  string userID = 1; 
-  string reservationID = 2; 
+  string userID = 1;
+  string reservationID = 2;
 }
 
 message CancelReply {}

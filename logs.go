@@ -1,7 +1,6 @@
 package sagas
 
 import (
-	"bytes"
 	"errors"
 
 	"github.com/triplewy/sagas/utils"
@@ -10,41 +9,65 @@ import (
 
 var ErrLogIndexNotFound = errors.New("log index not found in log store")
 
-type Status int
-
-const (
-	Start Status = iota + 1
-	End
-	Abort
-	Comp
-)
-
 type Log struct {
+	Lsn    uint64
 	SagaID uint64
-	Name   string
-	Status Status
-	Data   []byte
+	Saga   Saga
 }
 
-// Equal compares equality between two logs. For testing purposes
-func (a Log) Equal(b Log) bool {
-	if a.SagaID != b.SagaID {
-		return false
+func OpenDB(path string) *bolt.DB {
+	db, err := bolt.Open(path, 0666, nil)
+	if err != nil {
+		panic(err)
 	}
-	if a.Name != b.Name {
-		return false
+	err = db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("state"))
+		if err != nil {
+			return err
+		}
+		b, err := tx.CreateBucketIfNotExists([]byte("logs"))
+		if err != nil {
+			return err
+		}
+		if b.Sequence() > 0 {
+			return nil
+		}
+		key := utils.Uint64ToBytes(0)
+		initLog := Log{
+			Lsn:    0,
+			SagaID: 0,
+			Saga:   Saga{},
+		}
+		buf, err := utils.EncodeMsgPack(initLog)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, buf.Bytes())
+	})
+	if err != nil {
+		panic(err)
 	}
-	if a.Status != b.Status {
-		return false
-	}
-	if !bytes.Equal(a.Data, b.Data) {
-		return false
-	}
-	return true
+	return db
 }
 
-func (s *Sagas) LastIndex() uint64 {
-	tx, err := s.db.Begin(false)
+func (c *Coordinator) NewSagaID() (sagaID uint64) {
+	err := c.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("state"))
+		id, err := b.NextSequence()
+		if err != nil {
+			return err
+		}
+		sagaID = id
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
+func (c *Coordinator) LastIndex() uint64 {
+	tx, err := c.db.Begin(false)
 	if err != nil {
 		panic(err)
 	}
@@ -54,14 +77,19 @@ func (s *Sagas) LastIndex() uint64 {
 	return b.Sequence()
 }
 
-func (s *Sagas) Append(log Log) {
-	err := s.db.Update(func(tx *bolt.Tx) error {
+func (c *Coordinator) AppendLog(sagaID uint64, saga Saga) {
+	err := c.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("logs"))
 		index, err := b.NextSequence()
 		if err != nil {
 			return err
 		}
 		key := utils.Uint64ToBytes(index)
+		log := Log{
+			Lsn:    index,
+			SagaID: sagaID,
+			Saga:   saga,
+		}
 		buf, err := utils.EncodeMsgPack(log)
 		if err != nil {
 			return err
@@ -73,8 +101,8 @@ func (s *Sagas) Append(log Log) {
 	}
 }
 
-func (s *Sagas) GetLog(index uint64) (Log, error) {
-	tx, err := s.db.Begin(false)
+func (c *Coordinator) GetLog(index uint64) (Log, error) {
+	tx, err := c.db.Begin(false)
 	if err != nil {
 		panic(err)
 	}
