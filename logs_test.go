@@ -1,6 +1,10 @@
 package sagas
 
-import "testing"
+import (
+	"testing"
+
+	"gotest.tools/assert"
+)
 
 func TestLog(t *testing.T) {
 	config := DefaultConfig()
@@ -8,18 +12,15 @@ func TestLog(t *testing.T) {
 	defer s.Cleanup()
 
 	index := s.LastIndex()
-	if index != 0 {
-		t.Fatalf("Expected index: %d, Got: %d\n", 0, index)
-	}
+	assert.Equal(t, index, 0)
 
 	a := Log{
-		SagaID: 0,
-		Name:   "test",
-		Status: Start,
-		Data:   []byte{},
+		0,
+		0,
+		Saga{},
 	}
 
-	s.Append(a)
+	s.AppendLog(a)
 
 	index = s.LastIndex()
 	if index != 1 {
