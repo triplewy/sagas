@@ -9,10 +9,19 @@ import (
 
 var ErrLogIndexNotFound = errors.New("log index not found in log store")
 
+type LogType int
+
+const (
+	Init LogType = iota + 1
+	Graph
+	Vertex
+)
+
 type Log struct {
-	Lsn    uint64
-	SagaID uint64
-	Saga   Saga
+	Lsn     uint64
+	SagaID  uint64
+	LogType LogType
+	Data    []byte
 }
 
 func OpenDB(path string) *bolt.DB {
@@ -34,9 +43,10 @@ func OpenDB(path string) *bolt.DB {
 		}
 		key := utils.Uint64ToBytes(0)
 		initLog := Log{
-			Lsn:    0,
-			SagaID: 0,
-			Saga:   Saga{},
+			Lsn:     0,
+			SagaID:  0,
+			LogType: Init,
+			Data:    nil,
 		}
 		buf, err := utils.EncodeMsgPack(initLog)
 		if err != nil {
@@ -77,7 +87,7 @@ func (c *Coordinator) LastIndex() uint64 {
 	return b.Sequence()
 }
 
-func (c *Coordinator) AppendLog(sagaID uint64, saga Saga) {
+func (c *Coordinator) AppendLog(sagaID uint64, logType LogType, data []byte) {
 	err := c.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("logs"))
 		index, err := b.NextSequence()
@@ -86,9 +96,10 @@ func (c *Coordinator) AppendLog(sagaID uint64, saga Saga) {
 		}
 		key := utils.Uint64ToBytes(index)
 		log := Log{
-			Lsn:    index,
-			SagaID: sagaID,
-			Saga:   saga,
+			Lsn:     index,
+			SagaID:  sagaID,
+			LogType: logType,
+			Data:    data,
 		}
 		buf, err := utils.EncodeMsgPack(log)
 		if err != nil {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/triplewy/sagas/utils"
+
 	"github.com/triplewy/sagas/hotels"
 	bolt "go.etcd.io/bbolt"
 )
@@ -40,12 +42,44 @@ func NewCoordinator(config *Config) *Coordinator {
 }
 
 func (c *Coordinator) Recover() {
+	// Repopulate all sagas into memory
 	for i := uint64(1); i <= c.LastIndex(); i++ {
 		log, err := c.GetLog(i)
 		if err != nil {
 			panic(err)
 		}
-		c.sagas[log.SagaID] = log.Saga
+		switch log.LogType {
+		case Graph:
+			if _, ok := c.sagas[log.SagaID]; ok {
+				panic("multiple graphs with same sagaID")
+			}
+			var saga Saga
+			err := utils.DecodeMsgPack(log.Data, &saga)
+			if err != nil {
+				panic(err)
+			}
+			c.sagas[log.SagaID] = saga
+		case Vertex:
+			saga, ok := c.sagas[log.SagaID]
+			if !ok {
+				panic("log of vertex has sagaID that does not exist")
+			}
+			var vertex SagaVertex
+			err := utils.DecodeMsgPack(log.Data, &vertex)
+			if err != nil {
+				panic(err)
+			}
+			if _, ok := saga.Vertexes[vertex.VertexID]; !ok {
+				panic("vertexID does not exist in saga")
+			}
+			saga.Vertexes[vertex.VertexID] = vertex
+		default:
+			panic("unrecognized log type")
+		}
+	}
+	// Run all sagas
+	for _, saga := range c.sagas {
+		c.RunSaga(saga)
 	}
 }
 
@@ -54,6 +88,32 @@ func (c *Coordinator) StartSaga(saga Saga) {
 	id := c.NewSagaID()
 	// Persist start saga to log
 	c.AppendLog(id, saga)
+}
+
+func (c *Coordinator) RunSaga(saga Saga) {
+	// Find lowest vertices
+	var lowest []VertexID
+	for vID, children := range saga.TopDownDAG {
+		if len(children) == 0 {
+			lowest = append(lowest, vID)
+		}
+	}
+
+	// Find list of vertices to process
+	var process []VertexID
+	for len(lowest) > 0 {
+		var v VertexID
+		v, lowest = lowest[0], lowest[1:]
+		for _, parentID := range saga.BottomUpDAG[v] {
+			parent, ok := saga.Vertexes[parentID]
+			if !ok {
+				panic("vertexID does not exist in saga")
+			}
+			if parent.Status != EndT {
+
+			}
+		}
+	}
 }
 
 func (c *Coordinator) Run() {
