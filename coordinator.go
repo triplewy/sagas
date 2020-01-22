@@ -34,6 +34,8 @@ func NewCoordinator(config *Config) *Coordinator {
 		hotelsClient: client,
 	}
 
+	go c.Run()
+
 	if config.AutoRecover {
 		c.Recover()
 	}
@@ -83,14 +85,26 @@ func (c *Coordinator) Recover() {
 	}
 }
 
-func (c *Coordinator) StartSaga(saga Saga) {
-	// Get new saga ID
-	id := c.NewSagaID()
-	// Persist start saga to log
-	c.AppendLog(id, saga)
+func (c *Coordinator) RunSaga(saga Saga) {
+	// Check if saga already finished
+	finished, aborted := CheckSagaFinishedOrAbort(saga)
+	if finished {
+		return
+	}
+
+	if aborted {
+		c.RollbackSaga(saga)
+	} else {
+		c.ContinueSaga(saga)
+	}
+
 }
 
-func (c *Coordinator) RunSaga(saga Saga) {
+func (c *Coordinator) RollbackSaga(saga Saga) {
+
+}
+
+func (c *Coordinator) ContinueSaga(saga Saga) {
 	// Find lowest vertices
 	var lowest []VertexID
 	for vID, children := range saga.TopDownDAG {
@@ -99,11 +113,13 @@ func (c *Coordinator) RunSaga(saga Saga) {
 		}
 	}
 
-	// Find list of vertices to process
+	// Find list of vertices to process using bfs
 	var process []VertexID
 	for len(lowest) > 0 {
+		// pop first vertex off of lowest
 		var v VertexID
 		v, lowest = lowest[0], lowest[1:]
+		// Iterate through vertex parents to see if all have finished
 		for _, parentID := range saga.BottomUpDAG[v] {
 			parent, ok := saga.Vertexes[parentID]
 			if !ok {
