@@ -1,6 +1,10 @@
 package sagas
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/google/go-cmp/cmp"
+)
 
 // Errors involving incorrect sagas
 var (
@@ -50,6 +54,13 @@ type SagaVertex struct {
 // NewSaga creates a new saga from a dag and map of VertexIDs to vertices
 func NewSaga(dag map[VertexID]map[VertexID]struct{}, vertices map[VertexID]SagaVertex) Saga {
 	reverseDag := SwitchGraphDirection(dag)
+
+	// Just in case...
+	originalDag := SwitchGraphDirection(reverseDag)
+	if !cmp.Equal(dag, originalDag) {
+		panic(ErrUnequivalentDAGs)
+	}
+
 	return Saga{
 		TopDownDAG:  dag,
 		BottomUpDAG: reverseDag,
