@@ -7,16 +7,20 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// ErrLogIndexNotFound is used when a log does not exist at a specified index
 var ErrLogIndexNotFound = errors.New("log index not found in log store")
 
+// LogType is used for encoding and decoding structs into byte slices
 type LogType int
 
+// Enum for LogType
 const (
 	Init LogType = iota + 1
 	Graph
 	Vertex
 )
 
+// Log is stored on persistent disk to keep track of sagas
 type Log struct {
 	Lsn     uint64
 	SagaID  uint64
@@ -24,6 +28,7 @@ type Log struct {
 	Data    []byte
 }
 
+// OpenDB starts the DB process and makes sure there is an init log at index 0
 func OpenDB(path string) *bolt.DB {
 	db, err := bolt.Open(path, 0666, nil)
 	if err != nil {
@@ -60,6 +65,7 @@ func OpenDB(path string) *bolt.DB {
 	return db
 }
 
+// NewSagaID retrieves a unique saga ID by incrementing
 func (c *Coordinator) NewSagaID() (sagaID uint64) {
 	err := c.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("state"))
@@ -76,6 +82,7 @@ func (c *Coordinator) NewSagaID() (sagaID uint64) {
 	return
 }
 
+// LastIndex returns the last written log index
 func (c *Coordinator) LastIndex() uint64 {
 	tx, err := c.db.Begin(false)
 	if err != nil {
@@ -87,6 +94,7 @@ func (c *Coordinator) LastIndex() uint64 {
 	return b.Sequence()
 }
 
+// AppendLog takes a sagaID, LogType, and a slice of bytes and formats them into a log to persist to disk
 func (c *Coordinator) AppendLog(sagaID uint64, logType LogType, data []byte) {
 	err := c.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("logs"))
@@ -112,6 +120,7 @@ func (c *Coordinator) AppendLog(sagaID uint64, logType LogType, data []byte) {
 	}
 }
 
+// GetLog retrieves a log from the db. If a log does not exist at the index, GetLog returns ErrLogIndexNotFound
 func (c *Coordinator) GetLog(index uint64) (Log, error) {
 	tx, err := c.db.Begin(false)
 	if err != nil {

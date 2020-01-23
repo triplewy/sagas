@@ -4,12 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/triplewy/sagas/utils"
-
 	"github.com/triplewy/sagas/hotels"
 	bolt "go.etcd.io/bbolt"
 )
 
+// Coordinator handles saga requests by calling RPCs and persisting logs to disk
 type Coordinator struct {
 	Config *Config
 	db     *bolt.DB
@@ -20,6 +19,7 @@ type Coordinator struct {
 	hotelsClient hotels.HotelsClient
 }
 
+// NewCoordinator creates a new coordinator based on a config
 func NewCoordinator(config *Config) *Coordinator {
 	db := OpenDB(config.Path)
 	client := hotels.NewClient(config.HotelsAddr)
@@ -43,36 +43,30 @@ func NewCoordinator(config *Config) *Coordinator {
 	return c
 }
 
+// Recover reads logs from disks and reconstructs dags in memory
 func (c *Coordinator) Recover() {
 	// Repopulate all sagas into memory
 	for i := uint64(1); i <= c.LastIndex(); i++ {
 		log, err := c.GetLog(i)
 		if err != nil {
-			panic(err)
+			// Error must be ErrLogIndexNotFound so we just skip the index
+			continue
 		}
 		switch log.LogType {
 		case Graph:
 			if _, ok := c.sagas[log.SagaID]; ok {
 				panic("multiple graphs with same sagaID")
 			}
-			var saga Saga
-			err := utils.DecodeMsgPack(log.Data, &saga)
-			if err != nil {
-				panic(err)
-			}
+			saga := decodeSaga(log.Data)
 			c.sagas[log.SagaID] = saga
 		case Vertex:
 			saga, ok := c.sagas[log.SagaID]
 			if !ok {
 				panic("log of vertex has sagaID that does not exist")
 			}
-			var vertex SagaVertex
-			err := utils.DecodeMsgPack(log.Data, &vertex)
-			if err != nil {
-				panic(err)
-			}
+			vertex := decodeSagaVertex(log.Data)
 			if _, ok := saga.Vertices[vertex.VertexID]; !ok {
-				panic("vertexID does not exist in saga")
+				panic(ErrVertexIDNotFound)
 			}
 			saga.Vertices[vertex.VertexID] = vertex
 		default:
@@ -85,6 +79,7 @@ func (c *Coordinator) Recover() {
 	}
 }
 
+// RunSaga first checks if saga is already finished. Each unfinished saga then runs in its own goroutine
 func (c *Coordinator) RunSaga(saga Saga) {
 	// Check if saga already finished
 	finished, aborted := CheckFinishedOrAbort(saga.Vertices)
@@ -100,10 +95,12 @@ func (c *Coordinator) RunSaga(saga Saga) {
 
 }
 
+// RollbackSaga calls necessary compensating functions to undo saga
 func (c *Coordinator) RollbackSaga(saga Saga) {
 
 }
 
+// ContinueSaga runs saga forward
 func (c *Coordinator) ContinueSaga(saga Saga) {
 	// Find lowest vertices
 	var lowest []VertexID
@@ -123,7 +120,7 @@ func (c *Coordinator) ContinueSaga(saga Saga) {
 		for parentID := range saga.BottomUpDAG[v] {
 			parent, ok := saga.Vertices[parentID]
 			if !ok {
-				panic("vertexID does not exist in saga")
+				panic(ErrVertexIDNotFound)
 			}
 			if parent.Status != EndT {
 
@@ -132,6 +129,7 @@ func (c *Coordinator) ContinueSaga(saga Saga) {
 	}
 }
 
+// Run reads from a channel to serialize updates to log and corresponding sagas
 func (c *Coordinator) Run() {
 	for {
 		select {
@@ -140,42 +138,6 @@ func (c *Coordinator) Run() {
 		}
 	}
 }
-
-// // Call BookRoom
-// // Log Start of transaction to log
-// c.Append(Log{
-// 	SagaID: id,
-// 	Name:   "hotel",
-// 	Status: Start,
-// 	Data:   []byte{},
-// })
-// // Call remote rpc to book hotel
-// reservationID, err := hotels.BookRoom(c.hotelsClient, userID, roomID)
-// if err != nil {
-// 	// if err, log Abort to log
-// 	c.Append(Log{
-// 		SagaID: id,
-// 		Name:   "hotel",
-// 		Status: Abort,
-// 		Data:   []byte(err.Error()),
-// 	})
-// } else {
-// 	// No err so log End to log
-// 	c.Append(Log{
-// 		SagaID: id,
-// 		Name:   "hotel",
-// 		Status: End,
-// 		Data:   []byte(reservationID), // Need to store reservationID in data in case of comp transaction later on
-// 	})
-// }
-
-// // Log end to log
-// c.Append(Log{
-// 	SagaID: id,
-// 	Name:   "saga",
-// 	Status: End,
-// 	Data:   []byte{},
-// })
 
 // Cleanup removes saga coordinator persistent state
 func (c *Coordinator) Cleanup() {

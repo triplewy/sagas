@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/triplewy/sagas/utils"
 )
 
 // Errors involving incorrect sagas
@@ -214,4 +215,38 @@ func CheckValidSaga(saga Saga, aborted bool) error {
 	}
 
 	return nil
+}
+
+func encodeSaga(saga Saga) []byte {
+	buf, err := utils.EncodeMsgPack(saga)
+	if err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+func decodeSaga(data []byte) Saga {
+	var saga Saga
+	err := utils.DecodeMsgPack(data, &saga)
+	if err != nil {
+		panic(err)
+	}
+	return saga
+}
+
+func encodeSagaVertex(vertex SagaVertex) []byte {
+	buf, err := utils.EncodeMsgPack(vertex)
+	if err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+func decodeSagaVertex(data []byte) SagaVertex {
+	var vertex SagaVertex
+	err := utils.DecodeMsgPack(data, &vertex)
+	if err != nil {
+		panic(err)
+	}
+	return vertex
 }

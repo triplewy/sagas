@@ -299,5 +299,55 @@ func TestSaga(t *testing.T) {
 				}
 			})
 		})
+
+		t.Run("3 vertices", func(t *testing.T) {
+			dag := map[VertexID]map[VertexID]struct{}{
+				1: {2: struct{}{}, 3: struct{}{}},
+				2: {},
+				3: {},
+			}
+			tests := []struct {
+				name        string
+				status1     Status
+				status2     Status
+				status3     Status
+				expectError error
+			}{
+				{"EndT Abort NotReached", EndT, Abort, NotReached, nil},
+				{"EndT Abort StartT", EndT, Abort, StartT, nil},
+				{"EndT Abort EndT", EndT, Abort, EndT, nil},
+				{"EndT Abort StartC", EndT, Abort, StartC, nil},
+				{"EndT Abort EndC", EndT, Abort, EndC, nil},
+				{"EndT Abort Abort", EndT, Abort, Abort, nil},
+				{"EndT NotReached NotReached", EndT, NotReached, NotReached, nil},
+				{"EndT NotReached StartT", EndT, NotReached, StartT, nil},
+				{"EndT NotReached EndT", EndT, NotReached, EndT, nil},
+				{"EndT NotReached StartC", EndT, NotReached, StartC, ErrInvalidSaga},
+				{"EndT NotReached EndC", EndT, NotReached, EndC, ErrInvalidSaga},
+				{"EndT StartT StartT", EndT, StartT, StartT, nil},
+				{"EndT StartT EndT", EndT, StartT, EndT, nil},
+				{"EndT StartT StartC", EndT, StartT, StartC, ErrInvalidSaga},
+				{"EndT StartT EndC", EndT, StartT, EndC, ErrInvalidSaga},
+				{"EndT EndT EndT", EndT, EndT, EndT, nil},
+				{"EndT EndT StartC", EndT, EndT, StartC, ErrInvalidSaga},
+				{"EndT EndT EndC", EndT, EndT, EndC, ErrInvalidSaga},
+				{"EndT StartC StartC", EndT, StartC, StartC, ErrInvalidSaga},
+				{"EndT StartC EndC", EndT, StartC, EndC, ErrInvalidSaga},
+				{"EndT EndC EndC", EndT, EndC, EndC, ErrInvalidSaga},
+			}
+
+			for _, tt := range tests {
+				t.Run(tt.name, func(t *testing.T) {
+					vertices := map[VertexID]SagaVertex{
+						1: SagaVertex{VertexID: 1, TFunc: tFunc, CFunc: cFunc, Status: tt.status1},
+						2: SagaVertex{VertexID: 2, TFunc: tFunc, CFunc: cFunc, Status: tt.status2},
+						3: SagaVertex{VertexID: 2, TFunc: tFunc, CFunc: cFunc, Status: tt.status3},
+					}
+					saga := NewSaga(dag, vertices)
+					_, aborted := CheckFinishedOrAbort(saga.Vertices)
+					assert.Equal(t, CheckValidSaga(saga, aborted), tt.expectError)
+				})
+			}
+		})
 	})
 }

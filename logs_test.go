@@ -1,38 +1,58 @@
 package sagas
 
-// func TestLog(t *testing.T) {
-// 	config := DefaultConfig()
-// 	s := NewCoordinator(config)
-// 	defer s.Cleanup()
+import (
+	"testing"
 
-// 	index := s.LastIndex()
+	"github.com/triplewy/sagas/utils"
 
-// 	assert.Equal(t, index, 0)
+	"gotest.tools/assert"
+)
 
-// 	a := Log{
-// 		0,
-// 		0,
-// 		Saga{},
-// 	}
+func TestLog(t *testing.T) {
+	config := DefaultConfig()
+	s := NewCoordinator(config)
+	defer s.Cleanup()
 
-// 	s.AppendLog(a)
+	index := s.LastIndex()
+	assert.Equal(t, index, uint64(0))
 
-// 	index = s.LastIndex()
-// 	if index != 1 {
-// 		t.Fatalf("Expected index: %d, Got: %d\n", 2, index)
-// 	}
+	sagaID := s.NewSagaID()
+	assert.Equal(t, sagaID, uint64(1))
 
-// 	b, err := s.GetLog(index)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
+	dag := map[VertexID]map[VertexID]struct{}{1: {}}
+	vertices := map[VertexID]SagaVertex{1: SagaVertex{
+		VertexID: 1,
+		TFunc:    SagaFunc{},
+		CFunc:    SagaFunc{},
+		Status:   StartT,
+	}}
+	saga := NewSaga(dag, vertices)
+	buf, err := utils.EncodeMsgPack(saga)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-// 	if !a.Equal(b) {
-// 		t.Fatalf("Expected: %v, Got: %v\n", a, b)
-// 	}
+	s.AppendLog(sagaID, Graph, buf.Bytes())
 
-// 	_, err = s.GetLog(index + 1)
-// 	if err != ErrLogIndexNotFound {
-// 		t.Fatalf("Expected: %v, Got: %v\n", ErrLogIndexNotFound, err)
-// 	}
-// }
+	index = s.LastIndex()
+	assert.Equal(t, index, uint64(1))
+
+	log, err := s.GetLog(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, log.SagaID, uint64(1))
+	assert.Equal(t, log.LogType, Graph)
+
+	var readSaga Saga
+	assert.NilError(t, utils.DecodeMsgPack(log.Data, &readSaga))
+
+	assert.DeepEqual(t, saga, readSaga)
+
+	_, err = s.GetLog(index + 1)
+	assert.Equal(t, err, ErrLogIndexNotFound)
+
+	sagaID = s.NewSagaID()
+	assert.Equal(t, sagaID, uint64(2))
+}
