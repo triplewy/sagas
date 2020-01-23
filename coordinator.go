@@ -71,10 +71,10 @@ func (c *Coordinator) Recover() {
 			if err != nil {
 				panic(err)
 			}
-			if _, ok := saga.Vertexes[vertex.VertexID]; !ok {
+			if _, ok := saga.Vertices[vertex.VertexID]; !ok {
 				panic("vertexID does not exist in saga")
 			}
-			saga.Vertexes[vertex.VertexID] = vertex
+			saga.Vertices[vertex.VertexID] = vertex
 		default:
 			panic("unrecognized log type")
 		}
@@ -87,7 +87,7 @@ func (c *Coordinator) Recover() {
 
 func (c *Coordinator) RunSaga(saga Saga) {
 	// Check if saga already finished
-	finished, aborted := CheckSagaFinishedOrAbort(saga)
+	finished, aborted := CheckFinishedOrAbort(saga.Vertices)
 	if finished {
 		return
 	}
@@ -114,14 +114,14 @@ func (c *Coordinator) ContinueSaga(saga Saga) {
 	}
 
 	// Find list of vertices to process using bfs
-	var process []VertexID
+	// var process []VertexID
 	for len(lowest) > 0 {
 		// pop first vertex off of lowest
 		var v VertexID
 		v, lowest = lowest[0], lowest[1:]
 		// Iterate through vertex parents to see if all have finished
-		for _, parentID := range saga.BottomUpDAG[v] {
-			parent, ok := saga.Vertexes[parentID]
+		for parentID := range saga.BottomUpDAG[v] {
+			parent, ok := saga.Vertices[parentID]
 			if !ok {
 				panic("vertexID does not exist in saga")
 			}
