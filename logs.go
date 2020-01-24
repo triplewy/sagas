@@ -51,7 +51,7 @@ func OpenDB(path string) *bolt.DB {
 			Lsn:     0,
 			SagaID:  0,
 			LogType: Init,
-			Data:    nil,
+			Data:    []byte{0},
 		}
 		buf, err := utils.EncodeMsgPack(initLog)
 		if err != nil {

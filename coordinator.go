@@ -53,6 +53,8 @@ func (c *Coordinator) Recover() {
 			continue
 		}
 		switch log.LogType {
+		case Init:
+			continue
 		case Graph:
 			if _, ok := c.sagas[log.SagaID]; ok {
 				panic("multiple graphs with same sagaID")
@@ -111,22 +113,53 @@ func (c *Coordinator) ContinueSaga(saga Saga) {
 	}
 
 	// Find list of vertices to process using bfs
-	// var process []VertexID
+	process := make(map[VertexID]SagaVertex)
 	for len(lowest) > 0 {
 		// pop first vertex off of lowest
-		var v VertexID
-		v, lowest = lowest[0], lowest[1:]
+		var childID VertexID
+		childID, lowest = lowest[0], lowest[1:]
+
+		// Check if vertex is already finished
+		child, ok := saga.Vertices[childID]
+		if !ok {
+			panic(ErrVertexIDNotFound)
+		}
+		if child.Status == EndT {
+			continue
+		}
+
+		canProcess := true
 		// Iterate through vertex parents to see if all have finished
-		for parentID := range saga.BottomUpDAG[v] {
+		for parentID := range saga.BottomUpDAG[childID] {
 			parent, ok := saga.Vertices[parentID]
 			if !ok {
 				panic(ErrVertexIDNotFound)
 			}
+			// If a parent has not ended, append parent to stack and set canProcess for this vertex to false
 			if parent.Status != EndT {
-
+				lowest = append(lowest, parentID)
+				canProcess = false
 			}
 		}
+		if canProcess {
+			process[childID] = child
+		}
 	}
+
+	// Run each vertex to process on a separate goroutine
+	for _, vertex := range process {
+		go c.ProcessT(saga.ID, vertex)
+	}
+}
+
+// ProcessT runs a SagaVertex's TFunc
+func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
+
+}
+
+// ProcessC runs a SagaVertex's CFunc
+func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
+
 }
 
 // Run reads from a channel to serialize updates to log and corresponding sagas
