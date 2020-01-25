@@ -3,6 +3,7 @@ package sagas
 import (
 	"errors"
 	"os"
+	"time"
 
 	"github.com/triplewy/sagas/hotels"
 	bolt "go.etcd.io/bbolt"
@@ -133,7 +134,52 @@ func (c *Coordinator) RunSaga(sagaID uint64, saga Saga) {
 
 // RollbackSaga calls necessary compensating functions to undo saga
 func (c *Coordinator) RollbackSaga(sagaID uint64, saga Saga) {
+	// Find highest vertices
+	var highest []VertexID
+	for vID, parents := range saga.BottomUpDAG {
+		if len(parents) == 0 {
+			highest = append(highest, vID)
+		}
+	}
 
+	// Find list of vertices to process using bfs
+	process := make(map[VertexID]SagaVertex)
+	for len(highest) > 0 {
+		// pop first vertex off of highest
+		var parentID VertexID
+		parentID, highest = highest[0], highest[1:]
+
+		// Check if vertex can be skipped. Conditions are: NotReached, EndC, Abort
+		parent, ok := saga.Vertices[parentID]
+		if !ok {
+			panic(ErrVertexIDNotFound)
+		}
+		if parent.Status == NotReached || parent.Status == EndC || parent.Status == Abort {
+			continue
+		}
+
+		canProcess := true
+		// Iterate through vertex children to see if all have NotReached, EndC, or Abort
+		for childID := range saga.TopDownDAG[parentID] {
+			child, ok := saga.Vertices[childID]
+			if !ok {
+				panic(ErrVertexIDNotFound)
+			}
+			// If a child has not completed rolled back, append child to stack and set canProcess for this vertex to false
+			if child.Status == StartT || child.Status == EndT || child.Status == StartC {
+				highest = append(highest, childID)
+				canProcess = false
+			}
+		}
+		if canProcess {
+			process[parentID] = parent
+		}
+	}
+
+	// Run each vertex to process on a separate goroutine
+	for _, vertex := range process {
+		go c.ProcessC(sagaID, vertex)
+	}
 }
 
 // ContinueSaga runs saga forward
@@ -221,6 +267,7 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 			panic(ErrInvalidFuncInputType)
 		}
 		reservationID, err := hotels.BookRoom(c.hotelsClient, userID, roomID)
+		input := vertex.CFunc.Input
 		output := fn.Output
 		status := EndT
 		if err != nil {
@@ -231,19 +278,27 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 			status = Abort
 		} else {
 			output["reservationID"] = reservationID
+			input["reservationID"] = reservationID
 		}
-		// Create new SagaFunc storing updated output
+		// Create new TFunc storing updated output
 		newTFunc := SagaFunc{
 			FuncID:    fn.FuncID,
 			RequestID: fn.RequestID,
 			Input:     fn.Input,
 			Output:    output,
 		}
+		// Create new CFunc storing new reservationID
+		newCFunc := SagaFunc{
+			FuncID:    vertex.CFunc.FuncID,
+			RequestID: vertex.CFunc.RequestID,
+			Input:     input,
+			Output:    vertex.CFunc.Output,
+		}
 		// Create new SagaVertex
 		newVertex := SagaVertex{
 			VertexID: vertex.VertexID,
 			TFunc:    newTFunc,
-			CFunc:    vertex.CFunc,
+			CFunc:    newCFunc,
 			Status:   status,
 		}
 		// Append to log
@@ -260,7 +315,67 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 
 // ProcessC runs a SagaVertex's CFunc
 func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
+	// Sanity check on vertex's status
+	if vertex.Status == EndC {
+		return
+	}
+	if !(vertex.Status == StartT || vertex.Status == EndT || vertex.Status == StartC) {
+		panic(ErrInvalidSaga)
+	}
+	// If vertex status is StartT, execute EndT first
+	if vertex.Status == StartT {
+		c.ProcessT(sagaID, vertex)
+		return
+	}
 
+	// Now vertex must either be EndT or StartC. Append to log
+	data := encodeSagaVertex(vertex)
+	c.AppendLog(sagaID, Vertex, data)
+
+	// Evaluate vertex's Cfunc
+	fn := vertex.CFunc
+	switch fn.FuncID {
+	case "hotel_cancel":
+		value, ok := fn.Input["userID"]
+		if !ok {
+			panic(ErrInvalidFuncInputField)
+		}
+		userID, ok := value.(string)
+		if !ok {
+			panic(ErrInvalidFuncInputType)
+		}
+		value, ok = fn.Input["reservationID"]
+		if !ok {
+			panic(ErrInvalidFuncInputField)
+		}
+		reservationID, ok := value.(string)
+		if !ok {
+			panic(ErrInvalidFuncInputType)
+		}
+		err := hotels.CancelRoom(c.hotelsClient, userID, reservationID)
+		if err != nil {
+			// Simple wait and retry
+			time.Sleep(3 * time.Second)
+			err = hotels.CancelRoom(c.hotelsClient, userID, reservationID)
+		}
+
+		// Create new SagaVertex
+		newVertex := SagaVertex{
+			VertexID: vertex.VertexID,
+			TFunc:    vertex.TFunc,
+			CFunc:    vertex.CFunc,
+			Status:   EndC,
+		}
+		// Append to log
+		c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
+		// Send newVertex to update chan for coordinator to update its map of sagas
+		c.updateCh <- updateMsg{
+			sagaID: sagaID,
+			vertex: newVertex,
+		}
+	default:
+		panic(ErrInvalidFuncID)
+	}
 }
 
 // Run reads from a channel to serialize updates to log and corresponding sagas

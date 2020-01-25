@@ -11,10 +11,12 @@ import (
 
 // Errors involving hotel business logic
 var (
-	ErrRoomAlreadyBooked = errors.New("Room has already been booked by user")
-	ErrRoomUnavailable   = errors.New("Room is unavailable to book")
-	ErrNetworkBlocked    = errors.New("network is blocked")
-	ErrInvalidMapType    = errors.New("invalid value type in map")
+	ErrRoomAlreadyBooked   = errors.New("Room has already been booked by user")
+	ErrRoomUnavailable     = errors.New("Room is unavailable to book")
+	ErrReservationNotFound = errors.New("ReservationID does not exist")
+	ErrIncorrectType       = errors.New("Incorrect type for map value")
+	ErrNetworkBlocked      = errors.New("network is blocked")
+	ErrInvalidMapType      = errors.New("invalid value type in map")
 )
 
 type Status int
@@ -24,10 +26,17 @@ const (
 	Canceled
 )
 
+type Reservation struct {
+	ID     string
+	UserID string
+	RoomID string
+	Status Status
+}
+
 type Hotels struct {
 	currID       *atomic.Uint64
 	Rooms        cmap.ConcurrentMap
-	reservations cmap.ConcurrentMap
+	Reservations cmap.ConcurrentMap
 	requests     cmap.ConcurrentMap
 
 	BlockNetwork *atomic.Bool
@@ -38,7 +47,7 @@ func NewHotels() *Hotels {
 	return &Hotels{
 		currID:       atomic.NewUint64(0),
 		Rooms:        cmap.New(),
-		reservations: cmap.New(),
+		Reservations: cmap.New(),
 		requests:     cmap.New(),
 
 		BlockNetwork: atomic.NewBool(false),
@@ -66,11 +75,31 @@ func (h *Hotels) BookRPC(ctx context.Context, req *BookReq) (*BookReply, error) 
 
 	// Set reservation to Booked
 	reservationID := h.newID()
-	h.reservations.Set(reservationID, Booked)
+	h.Reservations.Set(reservationID, Reservation{
+		ID:     reservationID,
+		UserID: req.GetUserID(),
+		RoomID: req.GetRoomID(),
+		Status: Booked,
+	})
 	return &BookReply{ReservationID: reservationID}, nil
 }
 
 func (h *Hotels) CancelRPC(ctx context.Context, req *CancelReq) (*CancelReply, error) {
-	h.reservations.Set(req.GetReservationID(), Canceled)
+	value, ok := h.Reservations.Get(req.GetReservationID())
+	if !ok {
+		return nil, ErrReservationNotFound
+	}
+	reservation, ok := value.(Reservation)
+	if !ok {
+		return nil, ErrIncorrectType
+	}
+	h.Rooms.Remove(reservation.RoomID)
+	newReservation := Reservation{
+		ID:     reservation.ID,
+		UserID: reservation.UserID,
+		RoomID: reservation.RoomID,
+		Status: Canceled,
+	}
+	h.Reservations.Set(req.GetReservationID(), newReservation)
 	return &CancelReply{}, nil
 }

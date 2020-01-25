@@ -2,6 +2,7 @@ package sagas
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/triplewy/sagas/utils"
 	bolt "go.etcd.io/bbolt"
@@ -20,12 +21,45 @@ const (
 	Vertex
 )
 
+// GoString implements fmt GoString interface
+func (t LogType) GoString() string {
+	switch t {
+	case Init:
+		return "Init"
+	case Graph:
+		return "Graph"
+	case Vertex:
+		return "Vertex"
+	default:
+		return "Unknown"
+	}
+}
+
 // Log is stored on persistent disk to keep track of sagas
 type Log struct {
 	Lsn     uint64
 	SagaID  uint64
 	LogType LogType
 	Data    []byte
+}
+
+// GoString implements fmt GoString interface
+func (log Log) GoString() string {
+	data := func() string {
+		switch log.LogType {
+		case Init:
+			return "{}"
+		case Graph:
+			saga := decodeSaga(log.Data)
+			return saga.GoString()
+		case Vertex:
+			vertex := decodeSagaVertex(log.Data)
+			return vertex.GoString()
+		default:
+			return "unknown data"
+		}
+	}()
+	return fmt.Sprintf("Log{\n\tLsn: %v,\n\tSagaID: %v,\n\tLogType: %#v,\n\tData: %v\n}", log.Lsn, log.SagaID, log.LogType, data)
 }
 
 // OpenDB starts the DB process and makes sure there is an init log at index 0

@@ -21,16 +21,20 @@ func TestCancel(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		value, ok := h.reservations.Get(id)
+		value, ok := h.Reservations.Get(id)
 		if !ok {
 			t.Fatal("Expected reservations to have key reservationID but does not exist")
 		}
-		status, ok := value.(Status)
+		reservation, ok := value.(Reservation)
 		if !ok {
 			t.Fatal(ErrInvalidMapType)
 		}
-		if status != Canceled {
-			t.Fatalf("Expected room status: %v, Got: %v\n", Canceled, status)
+		if reservation.Status != Canceled {
+			t.Fatalf("Expected room status: %v, Got: %v\n", Canceled, reservation.Status)
+		}
+		_, ok = h.Rooms.Get(reservation.RoomID)
+		if ok {
+			t.Fatal("Expected reservation RoomID to not exist in Rooms")
 		}
 	})
 }

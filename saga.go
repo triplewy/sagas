@@ -2,6 +2,7 @@ package sagas
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/triplewy/sagas/utils"
@@ -22,6 +23,11 @@ type Saga struct {
 	TopDownDAG  map[VertexID]map[VertexID]struct{}
 	BottomUpDAG map[VertexID]map[VertexID]struct{}
 	Vertices    map[VertexID]SagaVertex
+}
+
+// GoString implements fmt GoString interface
+func (s Saga) GoString() string {
+	return fmt.Sprintf("Saga{TopDownDAG: %v, Vertices: %#v}", s.TopDownDAG, s.Vertices)
 }
 
 // SagaFunc provides information to call a function in the Saga
@@ -45,12 +51,37 @@ const (
 	Abort
 )
 
+// GoString implements fmt GoString interface
+func (s Status) GoString() string {
+	switch s {
+	case NotReached:
+		return "NotReached"
+	case StartT:
+		return "StartT"
+	case EndT:
+		return "EndT"
+	case StartC:
+		return "StartC"
+	case EndC:
+		return "EndC"
+	case Abort:
+		return "Abort"
+	default:
+		return "Unknown"
+	}
+}
+
 // SagaVertex represents each vertex in a saga graph. Each vertex has a forward and compensating SagaFunc
 type SagaVertex struct {
 	VertexID VertexID
 	TFunc    SagaFunc
 	CFunc    SagaFunc
 	Status   Status
+}
+
+// GoString implements fmt GoString interface
+func (v SagaVertex) GoString() string {
+	return fmt.Sprintf("SagaVertex{VertexID: %v, TFunc: %v, CFunc: %v, Status: %v}", v.VertexID, v.TFunc.FuncID, v.CFunc.FuncID, v.Status.GoString())
 }
 
 // NewSaga creates a new saga from a dag and map of VertexIDs to vertices

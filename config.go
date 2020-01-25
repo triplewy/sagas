@@ -10,6 +10,7 @@ type Config struct {
 	Path        string
 	HotelsAddr  string
 	AutoRecover bool
+	InMemory    bool
 }
 
 // DefaultConfig provides default config for saga coordinator
@@ -18,5 +19,6 @@ func DefaultConfig() *Config {
 		Path:        filepath.Join(os.TempDir(), "sagas"),
 		HotelsAddr:  "localhost:50051",
 		AutoRecover: true,
+		InMemory:    true,
 	}
 }

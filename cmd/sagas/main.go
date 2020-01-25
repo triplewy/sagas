@@ -22,7 +22,7 @@ func main() {
 	c := sagas.NewCoordinator(config)
 	defer c.Cleanup()
 
-	err := sagas.NewHotelSaga(c, userID, roomID)
+	err := sagas.BookRoom(c, userID, roomID)
 	if err != nil {
 		log.Fatal(err)
 	}
