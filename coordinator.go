@@ -1,6 +1,7 @@
 package sagas
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -8,13 +9,32 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+// Errors from incorrect coordinator logic
+var (
+	ErrInvalidStatus         = errors.New("SagaVertex's status is invalid in the context of the saga")
+	ErrInvalidFuncID         = errors.New("invalid saga func ID")
+	ErrInvalidFuncInputField = errors.New("field does not exist in input for saga func")
+	ErrInvalidFuncInputType  = errors.New("incorrect type for input field in saga func")
+)
+
+type updateMsg struct {
+	sagaID uint64
+	vertex SagaVertex
+}
+
+type createMsg struct {
+	sagaID uint64
+	saga   Saga
+}
+
 // Coordinator handles saga requests by calling RPCs and persisting logs to disk
 type Coordinator struct {
 	Config *Config
 	db     *bolt.DB
 	sagas  map[uint64]Saga
 
-	updateCh chan Log
+	createCh chan createMsg
+	updateCh chan updateMsg
 
 	hotelsClient hotels.HotelsClient
 }
@@ -29,7 +49,8 @@ func NewCoordinator(config *Config) *Coordinator {
 		db:     db,
 		sagas:  make(map[uint64]Saga),
 
-		updateCh: make(chan Log),
+		createCh: make(chan createMsg),
+		updateCh: make(chan updateMsg),
 
 		hotelsClient: client,
 	}
@@ -76,34 +97,39 @@ func (c *Coordinator) Recover() {
 		}
 	}
 	// Run all sagas
-	for _, saga := range c.sagas {
-		c.RunSaga(saga)
+	for sagaID, saga := range c.sagas {
+		c.RunSaga(sagaID, saga)
 	}
 }
 
 // RunSaga first checks if saga is already finished. Each unfinished saga then runs in its own goroutine
-func (c *Coordinator) RunSaga(saga Saga) {
+func (c *Coordinator) RunSaga(sagaID uint64, saga Saga) {
 	// Check if saga already finished
 	finished, aborted := CheckFinishedOrAbort(saga.Vertices)
 	if finished {
 		return
 	}
 
+	err := CheckValidSaga(saga, aborted)
+	if err != nil {
+		panic(err)
+	}
+
 	if aborted {
-		c.RollbackSaga(saga)
+		c.RollbackSaga(sagaID, saga)
 	} else {
-		c.ContinueSaga(saga)
+		c.ContinueSaga(sagaID, saga)
 	}
 
 }
 
 // RollbackSaga calls necessary compensating functions to undo saga
-func (c *Coordinator) RollbackSaga(saga Saga) {
+func (c *Coordinator) RollbackSaga(sagaID uint64, saga Saga) {
 
 }
 
 // ContinueSaga runs saga forward
-func (c *Coordinator) ContinueSaga(saga Saga) {
+func (c *Coordinator) ContinueSaga(sagaID uint64, saga Saga) {
 	// Find lowest vertices
 	var lowest []VertexID
 	for vID, children := range saga.TopDownDAG {
@@ -148,13 +174,68 @@ func (c *Coordinator) ContinueSaga(saga Saga) {
 
 	// Run each vertex to process on a separate goroutine
 	for _, vertex := range process {
-		go c.ProcessT(saga.ID, vertex)
+		go c.ProcessT(sagaID, vertex)
 	}
 }
 
 // ProcessT runs a SagaVertex's TFunc
 func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
+	// Sanity check on vertex's status
+	if vertex.Status == EndT {
+		return
+	}
+	if !(vertex.Status == StartT || vertex.Status == NotReached) {
+		panic(ErrInvalidSaga)
+	}
 
+	// Append to log
+	data := encodeSagaVertex(vertex)
+	c.AppendLog(sagaID, Vertex, data)
+
+	// Evaluate vertex's function
+	fn := vertex.TFunc
+	switch fn.FuncID {
+	case "hotel":
+		value, ok := fn.Input["userID"]
+		if !ok {
+			panic(ErrInvalidFuncInputField)
+		}
+		userID, ok := value.(string)
+		if !ok {
+			panic(ErrInvalidFuncInputType)
+		}
+		value, ok = fn.Input["roomID"]
+		if !ok {
+			panic(ErrInvalidFuncInputField)
+		}
+		roomID, ok := value.(string)
+		if !ok {
+			panic(ErrInvalidFuncInputType)
+		}
+		reservationID, err := hotels.BookRoom(c.hotelsClient, userID, roomID)
+		if err != nil {
+			// If err, first log to stderr
+			Error.Println(err)
+			// Create new SagaFunc storing error to output
+			output := fn.Output
+			output["error"] = err.Error()
+			newTFunc := SagaFunc{
+				FuncID:    fn.FuncID,
+				RequestID: fn.RequestID,
+				Input:     fn.Input,
+				Output:    output,
+			}
+			newVertex := SagaVertex{
+				VertexID: vertex.VertexID,
+				TFunc:    newTFunc,
+				CFunc:    vertex.CFunc,
+				Status:   Abort,
+			}
+			c.updateCh <- updateMsg{}
+		}
+	default:
+		panic(ErrInvalidFuncID)
+	}
 }
 
 // ProcessC runs a SagaVertex's CFunc

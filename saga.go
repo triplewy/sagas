@@ -19,7 +19,6 @@ type VertexID uint64
 
 // Saga is a DAG of SagaVertices that keeps track of progress of a Saga transaction
 type Saga struct {
-	ID          uint64
 	TopDownDAG  map[VertexID]map[VertexID]struct{}
 	BottomUpDAG map[VertexID]map[VertexID]struct{}
 	Vertices    map[VertexID]SagaVertex
@@ -27,9 +26,10 @@ type Saga struct {
 
 // SagaFunc provides information to call a function in the Saga
 type SagaFunc struct {
-	ID     string
-	Input  map[string]interface{}
-	Output map[string]interface{}
+	FuncID    string
+	RequestID string
+	Input     map[string]interface{}
+	Output    map[string]interface{}
 }
 
 // Status is a possible condition of a transaction in a saga
