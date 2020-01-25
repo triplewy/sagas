@@ -85,15 +85,17 @@ func TestSaga(t *testing.T) {
 	})
 
 	tFunc := SagaFunc{
-		ID:     "t",
-		Input:  map[string]interface{}{},
-		Output: map[string]interface{}{},
+		FuncID:    "t",
+		RequestID: "x",
+		Input:     map[string]interface{}{},
+		Output:    map[string]interface{}{},
 	}
 
 	cFunc := SagaFunc{
-		ID:     "c",
-		Input:  map[string]interface{}{},
-		Output: map[string]interface{}{},
+		FuncID:    "c",
+		RequestID: "x",
+		Input:     map[string]interface{}{},
+		Output:    map[string]interface{}{},
 	}
 
 	t.Run("finished or abort", func(t *testing.T) {

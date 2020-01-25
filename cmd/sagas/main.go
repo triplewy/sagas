@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"log"
 
 	"github.com/triplewy/sagas"
 )
@@ -16,8 +17,14 @@ func init() {
 
 func main() {
 	flag.Parse()
-
 	config := sagas.DefaultConfig()
-	s := sagas.NewCoordinator(config)
-	s.StartSaga(userID, roomID)
+
+	c := sagas.NewCoordinator(config)
+	defer c.Cleanup()
+
+	err := sagas.NewHotelSaga(c, userID, roomID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("saga successful!")
 }

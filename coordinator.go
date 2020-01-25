@@ -2,7 +2,6 @@ package sagas
 
 import (
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/triplewy/sagas/hotels"
@@ -15,6 +14,8 @@ var (
 	ErrInvalidFuncID         = errors.New("invalid saga func ID")
 	ErrInvalidFuncInputField = errors.New("field does not exist in input for saga func")
 	ErrInvalidFuncInputType  = errors.New("incorrect type for input field in saga func")
+	ErrSagaIDAlreadyExists   = errors.New("create saga's sagaID already exists")
+	ErrSagaIDNotFound        = errors.New("update sagaID does not exist in coordinator's map")
 )
 
 type updateMsg struct {
@@ -23,15 +24,17 @@ type updateMsg struct {
 }
 
 type createMsg struct {
-	sagaID uint64
-	saga   Saga
+	sagaID  uint64
+	saga    Saga
+	replyCh chan Saga
 }
 
 // Coordinator handles saga requests by calling RPCs and persisting logs to disk
 type Coordinator struct {
-	Config *Config
-	db     *bolt.DB
-	sagas  map[uint64]Saga
+	Config   *Config
+	db       *bolt.DB
+	sagas    map[uint64]Saga
+	requests map[uint64]chan Saga
 
 	createCh chan createMsg
 	updateCh chan updateMsg
@@ -45,9 +48,10 @@ func NewCoordinator(config *Config) *Coordinator {
 	client := hotels.NewClient(config.HotelsAddr)
 
 	c := &Coordinator{
-		Config: config,
-		db:     db,
-		sagas:  make(map[uint64]Saga),
+		Config:   config,
+		db:       db,
+		sagas:    make(map[uint64]Saga),
+		requests: make(map[uint64]chan Saga),
 
 		createCh: make(chan createMsg),
 		updateCh: make(chan updateMsg),
@@ -102,11 +106,16 @@ func (c *Coordinator) Recover() {
 	}
 }
 
-// RunSaga first checks if saga is already finished. Each unfinished saga then runs in its own goroutine
+// RunSaga first checks if saga is already finished. Each unfinished saga vertex then runs in its own goroutine
 func (c *Coordinator) RunSaga(sagaID uint64, saga Saga) {
 	// Check if saga already finished
 	finished, aborted := CheckFinishedOrAbort(saga.Vertices)
 	if finished {
+		// Notify request that saga has finished
+		if replyCh, ok := c.requests[sagaID]; ok {
+			replyCh <- saga
+			delete(c.requests, sagaID)
+		}
 		return
 	}
 
@@ -120,7 +129,6 @@ func (c *Coordinator) RunSaga(sagaID uint64, saga Saga) {
 	} else {
 		c.ContinueSaga(sagaID, saga)
 	}
-
 }
 
 // RollbackSaga calls necessary compensating functions to undo saga
@@ -195,7 +203,7 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 	// Evaluate vertex's function
 	fn := vertex.TFunc
 	switch fn.FuncID {
-	case "hotel":
+	case "hotel_book":
 		value, ok := fn.Input["userID"]
 		if !ok {
 			panic(ErrInvalidFuncInputField)
@@ -213,25 +221,37 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 			panic(ErrInvalidFuncInputType)
 		}
 		reservationID, err := hotels.BookRoom(c.hotelsClient, userID, roomID)
+		output := fn.Output
+		status := EndT
 		if err != nil {
-			// If err, first log to stderr
 			Error.Println(err)
-			// Create new SagaFunc storing error to output
-			output := fn.Output
+			// Store error to output
 			output["error"] = err.Error()
-			newTFunc := SagaFunc{
-				FuncID:    fn.FuncID,
-				RequestID: fn.RequestID,
-				Input:     fn.Input,
-				Output:    output,
-			}
-			newVertex := SagaVertex{
-				VertexID: vertex.VertexID,
-				TFunc:    newTFunc,
-				CFunc:    vertex.CFunc,
-				Status:   Abort,
-			}
-			c.updateCh <- updateMsg{}
+			// Set status to abort
+			status = Abort
+		} else {
+			output["reservationID"] = reservationID
+		}
+		// Create new SagaFunc storing updated output
+		newTFunc := SagaFunc{
+			FuncID:    fn.FuncID,
+			RequestID: fn.RequestID,
+			Input:     fn.Input,
+			Output:    output,
+		}
+		// Create new SagaVertex
+		newVertex := SagaVertex{
+			VertexID: vertex.VertexID,
+			TFunc:    newTFunc,
+			CFunc:    vertex.CFunc,
+			Status:   status,
+		}
+		// Append to log
+		c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
+		// Send newVertex to update chan for coordinator to update its map of sagas
+		c.updateCh <- updateMsg{
+			sagaID: sagaID,
+			vertex: newVertex,
 		}
 	default:
 		panic(ErrInvalidFuncID)
@@ -247,8 +267,46 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 func (c *Coordinator) Run() {
 	for {
 		select {
-		case log := <-c.updateCh:
-			fmt.Println(log)
+		case msg := <-c.updateCh:
+			sagaID := msg.sagaID
+			vertex := msg.vertex
+			saga, ok := c.sagas[sagaID]
+			if !ok {
+				panic(ErrSagaIDNotFound)
+			}
+			// Create new vertices and new saga
+			newVertices := make(map[VertexID]SagaVertex, len(saga.Vertices))
+			for id, v := range saga.Vertices {
+				newVertices[id] = v
+			}
+			if _, ok := newVertices[vertex.VertexID]; !ok {
+				panic(ErrVertexIDNotFound)
+			}
+			newVertices[vertex.VertexID] = vertex
+			newSaga := Saga{
+				TopDownDAG:  saga.TopDownDAG,
+				BottomUpDAG: saga.BottomUpDAG,
+				Vertices:    newVertices,
+			}
+			// Update coordinator map and run updated saga
+			c.sagas[sagaID] = newSaga
+			c.RunSaga(sagaID, newSaga)
+
+		case msg := <-c.createCh:
+			sagaID := msg.sagaID
+			saga := msg.saga
+			if _, ok := c.sagas[sagaID]; ok {
+				panic(ErrSagaIDAlreadyExists)
+			}
+			if _, ok := c.requests[sagaID]; ok {
+				panic(ErrSagaIDAlreadyExists)
+			}
+			// Append new saga to log
+			c.AppendLog(sagaID, Graph, encodeSaga(saga))
+			// Insert new saga and request and run new saga
+			c.sagas[sagaID] = saga
+			c.requests[sagaID] = msg.replyCh
+			c.RunSaga(msg.sagaID, saga)
 		}
 	}
 }

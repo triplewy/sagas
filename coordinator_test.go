@@ -1,16 +1,47 @@
 package sagas
 
-// func TestCoordinatorBasic(t *testing.T) {
-// 	config := DefaultConfig()
+import (
+	"fmt"
+	"testing"
 
-// 	server, _ := hotels.NewServer(config.HotelsAddr)
-// 	hClient := hotels.NewClient(config.HotelsAddr)
-// 	defer server.GracefulStop()
+	"github.com/triplewy/sagas/hotels"
+	"gotest.tools/assert"
+)
 
-// 	c := NewCoordinator(config)
-// 	defer c.Cleanup()
+func TestCoordinator(t *testing.T) {
+	config := DefaultConfig()
 
-// 	t.Run("1 transaction", func(t *testing.T) {
+	server, _ := hotels.NewServer(config.HotelsAddr)
+	// hClient := hotels.NewClient(config.HotelsAddr)
+	defer server.GracefulStop()
+
+	c := NewCoordinator(config)
+	defer c.Cleanup()
+
+	t.Run("1 transaction", func(t *testing.T) {
+		beginIndex := c.LastIndex()
+		err := NewHotelSaga(c, "user0", "room0")
+		assert.NilError(t, err)
+		// Check if logs are there
+		endIndex := c.LastIndex()
+		assert.Equal(t, beginIndex+3, endIndex)
+		for i := beginIndex + 1; i <= endIndex; i++ {
+			log, err := c.GetLog(i)
+			assert.NilError(t, err)
+			fmt.Printf("%+v\n", log)
+			switch log.LogType {
+			case Graph:
+				fmt.Printf("%+v\n", decodeSaga(log.Data))
+			case Vertex:
+				fmt.Printf("%+v\n", decodeSagaVertex(log.Data))
+			default:
+				t.Fatal("unexpected LogType")
+
+			}
+		}
+	})
+}
+
 // 		t.Run("success", func(t *testing.T) {
 // 			c.StartSaga("user0", "room0")
 // 			index := c.LastIndex()
