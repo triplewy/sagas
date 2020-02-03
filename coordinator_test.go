@@ -1,6 +1,8 @@
 package sagas
 
 import (
+	"fmt"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -86,53 +88,50 @@ func TestCoordinator(t *testing.T) {
 	})
 }
 
-// func TestCoordinatorCoordinatorFailure(t *testing.T) {
-// 	config := DefaultConfig()
-// 	server, h := hotels.NewServer(config.HotelsAddr)
-// 	defer server.GracefulStop()
+func TestCoordinatorFailure(t *testing.T) {
+	config := DefaultConfig()
+	server, h := hotels.NewServer(config.HotelsAddr)
+	defer server.GracefulStop()
 
-// 	t.Run("1 transaction", func(t *testing.T) {
-// 		t.Run("before rpc", func(t *testing.T) {
-// 			// Block network so sagas cannot communicate with entity service
-// 			h.BlockNetwork.Store(true)
+	t.Run("1 transaction", func(t *testing.T) {
+		t.Run("before rpc", func(t *testing.T) {
+			// Block network so sagas cannot communicate with entity service
+			h.BlockNetwork.Store(true)
 
-// 			// Start first coordinator
-// 			cmd := exec.Command("bin/sagas", "-user", "user2", "-room", "room2")
-// 			err := cmd.Start()
-// 			if err != nil {
-// 				t.Fatal(err)
-// 			}
-// 			// Wait for coordinator to make some requests
-// 			time.Sleep(2 * time.Second)
+			// Start first coordinator
+			cmd := exec.Command("bin/sagas", "-user", "user5", "-room", "room5")
+			err := cmd.Start()
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Wait for coordinator to make some requests
+			time.Sleep(2 * time.Second)
 
-// 			// Kill coordinator
-// 			err = cmd.Process.Kill()
-// 			if err != nil {
-// 				t.Fatal(err)
-// 			}
+			// Kill coordinator
+			err = cmd.Process.Kill()
+			if err != nil {
+				t.Fatal(err)
+			}
 
-// 			// Check if reservation failed
-// 			if _, ok := h.Rooms.Get("room2"); ok {
-// 				t.Fatal("Expected rooms to not have key 'room2' but has key")
-// 			}
+			// Check if reservation failed
+			_, ok := h.Rooms.Get("room5")
+			assert.Assert(t, !ok)
 
-// 			c := NewCoordinator(config)
-// 			defer c.Cleanup()
+			c := NewCoordinator(config)
+			defer c.Cleanup()
 
-// 			lastLog, err := c.GetLog(c.LastIndex())
-// 			if err != nil {
-// 				t.Fatal(err)
-// 			}
+			h.BlockNetwork.Store(false)
 
-// 			// Check if last log is start log for hotel
-// 			if lastLog.Name != "hotel" || lastLog.Status != Start {
-// 				t.Fatalf("Got incorrect log: %v\n", lastLog)
-// 			}
+			time.Sleep(2 * time.Second)
 
-// 		})
+			lastLog, err := c.GetLog(c.LastIndex())
+			assert.NilError(t, err)
 
-// 		t.Run("after rpc", func(t *testing.T) {
+			fmt.Printf("%#v\n", lastLog)
+		})
 
-// 		})
-// 	})
-// }
+		t.Run("after rpc", func(t *testing.T) {
+
+		})
+	})
+}
