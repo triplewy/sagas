@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/triplewy/sagas/utils"
 )
 
@@ -17,26 +16,6 @@ var (
 
 // VertexID is a unique id representing each vertex in each saga
 type VertexID uint64
-
-// Saga is a DAG of SagaVertices that keeps track of progress of a Saga transaction
-type Saga struct {
-	TopDownDAG  map[VertexID]map[VertexID]struct{}
-	BottomUpDAG map[VertexID]map[VertexID]struct{}
-	Vertices    map[VertexID]SagaVertex
-}
-
-// GoString implements fmt GoString interface
-func (s Saga) GoString() string {
-	return fmt.Sprintf("Saga{TopDownDAG: %v, Vertices: %#v}", s.TopDownDAG, s.Vertices)
-}
-
-// SagaFunc provides information to call a function in the Saga
-type SagaFunc struct {
-	Addr      string
-	RequestID string
-	Input     map[string]string
-	Output    map[string]string
-}
 
 // Status is a possible condition of a transaction in a saga
 type Status int
@@ -71,33 +50,60 @@ func (s Status) GoString() string {
 	}
 }
 
+// Saga is a DAG of SagaVertices that keeps track of progress of a Saga transaction
+type Saga struct {
+	TopDownDAG map[VertexID]map[VertexID]SagaEdge
+	// BottomUpDAG map[VertexID]map[VertexID]SagaEdge
+	Vertices map[VertexID]SagaVertex
+}
+
+// GoString implements fmt GoString interface
+func (s Saga) GoString() string {
+	return fmt.Sprintf("Saga{TopDownDAG: %v, Vertices: %#v}", s.TopDownDAG, s.Vertices)
+}
+
 // SagaVertex represents each vertex in a saga graph. Each vertex has a forward and compensating SagaFunc
 type SagaVertex struct {
-	VertexID VertexID
-	TFunc    SagaFunc
-	CFunc    SagaFunc
-	Status   Status
+	VertexID       VertexID
+	TFunc          SagaFunc
+	CFunc          SagaFunc
+	TransferFields []string // fields to transfer from TFunc's resp to CFunc's body
+	Status         Status
 }
 
 // GoString implements fmt GoString interface
 func (v SagaVertex) GoString() string {
-	return fmt.Sprintf("SagaVertex{VertexID: %v, TFunc: %v, CFunc: %v, Status: %v}", v.VertexID, v.TFunc.FuncID, v.CFunc.FuncID, v.Status.GoString())
+	return fmt.Sprintf("SagaVertex{\n\tVertexID: %v,\n\tTFunc: %#v,\n\tCFunc: %#v,\n\tStatus: %v\n}", v.VertexID, v.TFunc, v.CFunc, v.Status.GoString())
+}
+
+// SagaEdge connects two SagaVertex's and transfers data between them
+type SagaEdge struct {
+	Fields []string
+}
+
+// SagaFunc provides information to call a function in the Saga
+type SagaFunc struct {
+	Addr      string
+	Method    string
+	RequestID string
+	Body      map[string]string
+	Resp      map[string]string
 }
 
 // NewSaga creates a new saga from a dag and map of VertexIDs to vertices
-func NewSaga(dag map[VertexID]map[VertexID]struct{}, vertices map[VertexID]SagaVertex) Saga {
-	reverseDag := SwitchGraphDirection(dag)
+func NewSaga(dag map[VertexID]map[VertexID]SagaEdge, vertices map[VertexID]SagaVertex) Saga {
+	// reverseDag := SwitchGraphDirection(dag)
 
-	// Just in case...
-	originalDag := SwitchGraphDirection(reverseDag)
-	if !cmp.Equal(dag, originalDag) {
-		panic(ErrUnequivalentDAGs)
-	}
+	// // Just in case...
+	// originalDag := SwitchGraphDirection(reverseDag)
+	// if !cmp.Equal(dag, originalDag) {
+	// 	panic(ErrUnequivalentDAGs)
+	// }
 
 	return Saga{
-		TopDownDAG:  dag,
-		BottomUpDAG: reverseDag,
-		Vertices:    vertices,
+		TopDownDAG: dag,
+		// BottomUpDAG: reverseDag,
+		Vertices: vertices,
 	}
 }
 
@@ -191,7 +197,6 @@ func CheckFinishedOrAbort(vertices map[VertexID]SagaVertex) (finished, aborted b
 // 1. Saga has a compensating status (StartC, EndC) without an Abort status
 // 2. Child has status Abort and parent has status NotReached or StartT or Abort
 // 3. Child has status other than NotReached or Abort and parent has status other than EndT
-// 4. If abort, parent has StartC or EndC status and child has StartT or EndT or StartC status
 func CheckValidSaga(saga Saga, aborted bool) error {
 	if aborted {
 		// For each vertex in the saga...
@@ -214,10 +219,6 @@ func CheckValidSaga(saga Saga, aborted bool) error {
 				if child.Status != NotReached && child.Status != Abort && parent.Status != EndT {
 					return ErrInvalidSaga
 				}
-				// Invariant 4
-				if (parent.Status == StartC || parent.Status == EndC) && (child.Status == StartT || child.Status == EndT || child.Status == StartC) {
-					return ErrInvalidSaga
-				}
 			}
 		}
 		return nil
@@ -229,21 +230,21 @@ func CheckValidSaga(saga Saga, aborted bool) error {
 		if child.Status == StartC || child.Status == EndC {
 			return ErrInvalidSaga
 		}
-		parents, ok := saga.BottomUpDAG[childID]
-		if !ok {
-			return ErrVertexIDNotFound
-		}
+		// parents, ok := saga.BottomUpDAG[childID]
+		// if !ok {
+		// 	return ErrVertexIDNotFound
+		// }
 		// For each vertex's parents...
-		for parentID := range parents {
-			parent, ok := saga.Vertices[parentID]
-			if !ok {
-				return ErrVertexIDNotFound
-			}
-			// Invariant 2
-			if child.Status != NotReached && parent.Status != EndT {
-				return ErrInvalidSaga
-			}
-		}
+		// for parentID := range parents {
+		// 	parent, ok := saga.Vertices[parentID]
+		// 	if !ok {
+		// 		return ErrVertexIDNotFound
+		// 	}
+		// 	// Invariant 2
+		// 	if child.Status != NotReached && parent.Status != EndT {
+		// 		return ErrInvalidSaga
+		// 	}
+		// }
 	}
 
 	return nil

@@ -3,6 +3,7 @@ package sagas
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/triplewy/sagas/utils"
 	bolt "go.etcd.io/bbolt"
@@ -69,8 +70,10 @@ func OpenDB(path string) *bolt.DB {
 		panic(err)
 	}
 	err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte("state"))
-		if err != nil {
+		if _, err := tx.CreateBucketIfNotExists([]byte("requests")); err != nil {
+			return err
+		}
+		if _, err = tx.CreateBucketIfNotExists([]byte("state")); err != nil {
 			return err
 		}
 		b, err := tx.CreateBucketIfNotExists([]byte("logs"))
@@ -108,6 +111,24 @@ func (c *Coordinator) NewSagaID() (sagaID uint64) {
 			return err
 		}
 		sagaID = id
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
+// NewRequestID retrieves a unique request ID by incrementing
+func (c *Coordinator) NewRequestID() (requestID string) {
+	err := c.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("requests"))
+		id, err := b.NextSequence()
+		if err != nil {
+			return err
+		}
+
+		requestID = strconv.FormatUint(id, 10)
 		return nil
 	})
 	if err != nil {

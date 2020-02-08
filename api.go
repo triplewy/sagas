@@ -12,28 +12,34 @@ var (
 
 // BookRoom starts a new saga that makes a single transaction to book a hotel room
 func BookRoom(c *Coordinator, userID, roomID string) error {
-	dag := map[VertexID]map[VertexID]struct{}{
+	dag := map[VertexID]map[VertexID]SagaEdge{
 		1: {},
 	}
+
+	requestID1 := c.NewRequestID()
+	requestID2 := c.NewRequestID()
+
 	vertices := map[VertexID]SagaVertex{
 		1: SagaVertex{
 			VertexID: 1,
 			TFunc: SagaFunc{
-				FuncID:    "hotel_book",
-				RequestID: "__required___",
-				Input: map[string]interface{}{
+				Addr:      "hotels/book",
+				Method:    "POST",
+				RequestID: requestID1,
+				Body: map[string]string{
 					"userID": userID,
 					"roomID": roomID,
 				},
-				Output: map[string]interface{}{},
+				Resp: make(map[string]string),
 			},
 			CFunc: SagaFunc{
-				FuncID:    "hotel_cancel",
-				RequestID: "___required___",
-				Input: map[string]interface{}{
+				Addr:      "hotel/cancel",
+				Method:    "POST",
+				RequestID: requestID2,
+				Body: map[string]string{
 					"userID": userID,
 				},
-				Output: map[string]interface{}{},
+				Resp: make(map[string]string),
 			},
 			Status: NotReached,
 		},
@@ -60,33 +66,40 @@ func BookRoom(c *Coordinator, userID, roomID string) error {
 
 // BookMultipleRooms starts a new saga that makes a multiple transactions to book hotel rooms
 func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
-	dag := map[VertexID]map[VertexID]struct{}{}
+	dag := make(map[VertexID]map[VertexID]SagaEdge)
 	vertices := map[VertexID]SagaVertex{}
+
 	for i, roomID := range roomIDs {
 		vID := VertexID(i)
+		requestID1 := c.NewRequestID()
+		requestID2 := c.NewRequestID()
+
 		vertices[vID] = SagaVertex{
 			VertexID: vID,
 			TFunc: SagaFunc{
-				FuncID:    "hotel_book",
-				RequestID: "__required___",
-				Input: map[string]interface{}{
+				Addr:      "hotels/book",
+				Method:    "POST",
+				RequestID: requestID1,
+				Body: map[string]string{
 					"userID": userID,
 					"roomID": roomID,
 				},
-				Output: map[string]interface{}{},
+				Resp: make(map[string]string),
 			},
 			CFunc: SagaFunc{
-				FuncID:    "hotel_cancel",
-				RequestID: "___required___",
-				Input: map[string]interface{}{
+				Addr:      "hotel/cancel",
+				Method:    "POST",
+				RequestID: requestID2,
+				Body: map[string]string{
 					"userID": userID,
 				},
-				Output: map[string]interface{}{},
+				Resp: make(map[string]string),
 			},
 			Status: NotReached,
 		}
-		dag[vID] = map[VertexID]struct{}{}
+		dag[vID] = map[VertexID]SagaEdge{}
 	}
+
 	saga := NewSaga(dag, vertices)
 	sagaID := c.NewSagaID()
 	// replyCh has buffer of 1 so that coordinator is not blocking if reply chan is not being read
