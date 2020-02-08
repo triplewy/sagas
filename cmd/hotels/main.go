@@ -12,7 +12,7 @@ import (
 var addr string
 
 func init() {
-	flag.StringVar(&addr, "addr", "localhost:50051", "address for hotels server")
+	flag.StringVar(&addr, "addr", ":50051", "address for hotels server")
 }
 
 func main() {

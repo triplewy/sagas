@@ -6,13 +6,13 @@ import "google/api/annotations.proto";
 service Hotels {
   rpc BookRPC(BookReq) returns (BookReply) {
     option (google.api.http) = {
-      post: "/book"
+      post : "/book"
     };
   }
 
   rpc CancelRPC(CancelReq) returns (CancelReply) {
     option (google.api.http) = {
-      post: "/cancel"
+      post : "/cancel"
     };
   }
 }

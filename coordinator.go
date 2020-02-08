@@ -3,9 +3,7 @@ package sagas
 import (
 	"errors"
 	"os"
-	"time"
 
-	"github.com/triplewy/sagas/hotels"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -39,14 +37,11 @@ type Coordinator struct {
 
 	createCh chan createMsg
 	updateCh chan updateMsg
-
-	hotelsClient hotels.HotelsClient
 }
 
 // NewCoordinator creates a new coordinator based on a config
 func NewCoordinator(config *Config) *Coordinator {
 	db := OpenDB(config.Path)
-	client := hotels.NewClient(config.HotelsAddr)
 
 	c := &Coordinator{
 		Config:   config,
@@ -56,8 +51,6 @@ func NewCoordinator(config *Config) *Coordinator {
 
 		createCh: make(chan createMsg),
 		updateCh: make(chan updateMsg),
-
-		hotelsClient: client,
 	}
 
 	go c.Run()
@@ -249,65 +242,65 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 	// Evaluate vertex's function
 	fn := vertex.TFunc
 	switch fn.FuncID {
-	case "hotel_book":
-		value, ok := fn.Input["userID"]
-		if !ok {
-			panic(ErrInvalidFuncInputField)
-		}
-		userID, ok := value.(string)
-		if !ok {
-			panic(ErrInvalidFuncInputType)
-		}
-		value, ok = fn.Input["roomID"]
-		if !ok {
-			panic(ErrInvalidFuncInputField)
-		}
-		roomID, ok := value.(string)
-		if !ok {
-			panic(ErrInvalidFuncInputType)
-		}
-		reservationID, err := hotels.BookRoom(c.hotelsClient, userID, roomID)
-		input := vertex.CFunc.Input
-		output := fn.Output
-		status := EndT
-		if err != nil {
-			Error.Println(err)
-			// Store error to output
-			output["error"] = err.Error()
-			// Set status to abort
-			status = Abort
-		} else {
-			output["reservationID"] = reservationID
-			input["reservationID"] = reservationID
-		}
-		// Create new TFunc storing updated output
-		newTFunc := SagaFunc{
-			FuncID:    fn.FuncID,
-			RequestID: fn.RequestID,
-			Input:     fn.Input,
-			Output:    output,
-		}
-		// Create new CFunc storing new reservationID
-		newCFunc := SagaFunc{
-			FuncID:    vertex.CFunc.FuncID,
-			RequestID: vertex.CFunc.RequestID,
-			Input:     input,
-			Output:    vertex.CFunc.Output,
-		}
-		// Create new SagaVertex
-		newVertex := SagaVertex{
-			VertexID: vertex.VertexID,
-			TFunc:    newTFunc,
-			CFunc:    newCFunc,
-			Status:   status,
-		}
-		// Append to log
-		c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
-		// Send newVertex to update chan for coordinator to update its map of sagas
-		c.updateCh <- updateMsg{
-			sagaID: sagaID,
-			vertex: newVertex,
-		}
+	// case "hotel_book":
+	// 	value, ok := fn.Input["userID"]
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputField)
+	// 	}
+	// 	userID, ok := value.(string)
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputType)
+	// 	}
+	// 	value, ok = fn.Input["roomID"]
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputField)
+	// 	}
+	// 	roomID, ok := value.(string)
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputType)
+	// 	}
+	// 	reservationID, err := hotels.BookRoom(c.hotelsClient, userID, roomID)
+	// 	input := vertex.CFunc.Input
+	// 	output := fn.Output
+	// 	status := EndT
+	// 	if err != nil {
+	// 		Error.Println(err)
+	// 		// Store error to output
+	// 		output["error"] = err.Error()
+	// 		// Set status to abort
+	// 		status = Abort
+	// 	} else {
+	// 		output["reservationID"] = reservationID
+	// 		input["reservationID"] = reservationID
+	// 	}
+	// 	// Create new TFunc storing updated output
+	// 	newTFunc := SagaFunc{
+	// 		FuncID:    fn.FuncID,
+	// 		RequestID: fn.RequestID,
+	// 		Input:     fn.Input,
+	// 		Output:    output,
+	// 	}
+	// 	// Create new CFunc storing new reservationID
+	// 	newCFunc := SagaFunc{
+	// 		FuncID:    vertex.CFunc.FuncID,
+	// 		RequestID: vertex.CFunc.RequestID,
+	// 		Input:     input,
+	// 		Output:    vertex.CFunc.Output,
+	// 	}
+	// 	// Create new SagaVertex
+	// 	newVertex := SagaVertex{
+	// 		VertexID: vertex.VertexID,
+	// 		TFunc:    newTFunc,
+	// 		CFunc:    newCFunc,
+	// 		Status:   status,
+	// 	}
+	// 	// Append to log
+	// 	c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
+	// 	// Send newVertex to update chan for coordinator to update its map of sagas
+	// 	c.updateCh <- updateMsg{
+	// 		sagaID: sagaID,
+	// 		vertex: newVertex,
+	// 	}
 	default:
 		panic(ErrInvalidFuncID)
 	}
@@ -335,44 +328,44 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 	// Evaluate vertex's Cfunc
 	fn := vertex.CFunc
 	switch fn.FuncID {
-	case "hotel_cancel":
-		value, ok := fn.Input["userID"]
-		if !ok {
-			panic(ErrInvalidFuncInputField)
-		}
-		userID, ok := value.(string)
-		if !ok {
-			panic(ErrInvalidFuncInputType)
-		}
-		value, ok = fn.Input["reservationID"]
-		if !ok {
-			panic(ErrInvalidFuncInputField)
-		}
-		reservationID, ok := value.(string)
-		if !ok {
-			panic(ErrInvalidFuncInputType)
-		}
-		err := hotels.CancelRoom(c.hotelsClient, userID, reservationID)
-		if err != nil {
-			// Simple wait and retry
-			time.Sleep(3 * time.Second)
-			err = hotels.CancelRoom(c.hotelsClient, userID, reservationID)
-		}
+	// case "hotel_cancel":
+	// 	value, ok := fn.Input["userID"]
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputField)
+	// 	}
+	// 	userID, ok := value.(string)
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputType)
+	// 	}
+	// 	value, ok = fn.Input["reservationID"]
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputField)
+	// 	}
+	// 	reservationID, ok := value.(string)
+	// 	if !ok {
+	// 		panic(ErrInvalidFuncInputType)
+	// 	}
+	// 	err := hotels.CancelRoom(c.hotelsClient, userID, reservationID)
+	// 	if err != nil {
+	// 		// Simple wait and retry
+	// 		time.Sleep(3 * time.Second)
+	// 		err = hotels.CancelRoom(c.hotelsClient, userID, reservationID)
+	// 	}
 
-		// Create new SagaVertex
-		newVertex := SagaVertex{
-			VertexID: vertex.VertexID,
-			TFunc:    vertex.TFunc,
-			CFunc:    vertex.CFunc,
-			Status:   EndC,
-		}
-		// Append to log
-		c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
-		// Send newVertex to update chan for coordinator to update its map of sagas
-		c.updateCh <- updateMsg{
-			sagaID: sagaID,
-			vertex: newVertex,
-		}
+	// 	// Create new SagaVertex
+	// 	newVertex := SagaVertex{
+	// 		VertexID: vertex.VertexID,
+	// 		TFunc:    vertex.TFunc,
+	// 		CFunc:    vertex.CFunc,
+	// 		Status:   EndC,
+	// 	}
+	// 	// Append to log
+	// 	c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
+	// 	// Send newVertex to update chan for coordinator to update its map of sagas
+	// 	c.updateCh <- updateMsg{
+	// 		sagaID: sagaID,
+	// 		vertex: newVertex,
+	// 	}
 	default:
 		panic(ErrInvalidFuncID)
 	}

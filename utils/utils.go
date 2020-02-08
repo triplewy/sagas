@@ -23,7 +23,10 @@ func AvailableAddr() string {
 	return server.Addr().String()
 }
 
+// BaseTimeout is lowest timeout value
 const BaseTimeout = 1
+
+// MaxTimeout is maximum timeout value
 const MaxTimeout = 10
 
 // Backoff implements an exponential backoff algorithm with jitter.

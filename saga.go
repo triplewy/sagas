@@ -32,10 +32,10 @@ func (s Saga) GoString() string {
 
 // SagaFunc provides information to call a function in the Saga
 type SagaFunc struct {
-	FuncID    string
+	Addr      string
 	RequestID string
-	Input     map[string]interface{}
-	Output    map[string]interface{}
+	Input     map[string]string
+	Output    map[string]string
 }
 
 // Status is a possible condition of a transaction in a saga
