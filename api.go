@@ -16,14 +16,14 @@ func BookRoom(c *Coordinator, userID, roomID string) error {
 		1: {},
 	}
 
-	requestID1 := c.NewRequestID()
-	requestID2 := c.NewRequestID()
+	requestID1 := c.logs.NewRequestID()
+	requestID2 := c.logs.NewRequestID()
 
 	vertices := map[VertexID]SagaVertex{
 		1: SagaVertex{
 			VertexID: 1,
 			TFunc: SagaFunc{
-				URL:       "hotels/book",
+				URL:       "http://localhost:51051/book",
 				Method:    "POST",
 				RequestID: requestID1,
 				Body: map[string]string{
@@ -33,7 +33,7 @@ func BookRoom(c *Coordinator, userID, roomID string) error {
 				Resp: make(map[string]string),
 			},
 			CFunc: SagaFunc{
-				URL:       "hotel/cancel",
+				URL:       "http://localhost:51051/cancel",
 				Method:    "POST",
 				RequestID: requestID2,
 				Body: map[string]string{
@@ -46,7 +46,7 @@ func BookRoom(c *Coordinator, userID, roomID string) error {
 		},
 	}
 	saga := Saga{DAG: dag, Vertices: vertices}
-	sagaID := c.NewSagaID()
+	sagaID := c.logs.NewSagaID()
 	// replyCh has buffer of 1 so that coordinator is not blocking if reply chan is not being read
 	replyCh := make(chan Saga, 1)
 	c.createCh <- createMsg{
@@ -72,13 +72,13 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 
 	for i, roomID := range roomIDs {
 		vID := VertexID(i)
-		requestID1 := c.NewRequestID()
-		requestID2 := c.NewRequestID()
+		requestID1 := c.logs.NewRequestID()
+		requestID2 := c.logs.NewRequestID()
 
 		vertices[vID] = SagaVertex{
 			VertexID: vID,
 			TFunc: SagaFunc{
-				URL:       "hotels/book",
+				URL:       "localhost:51051/book",
 				Method:    "POST",
 				RequestID: requestID1,
 				Body: map[string]string{
@@ -88,7 +88,7 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 				Resp: make(map[string]string),
 			},
 			CFunc: SagaFunc{
-				URL:       "hotel/cancel",
+				URL:       "localhost:51051/cancel",
 				Method:    "POST",
 				RequestID: requestID2,
 				Body: map[string]string{
@@ -102,7 +102,7 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 	}
 
 	saga := Saga{DAG: dag, Vertices: vertices}
-	sagaID := c.NewSagaID()
+	sagaID := c.logs.NewSagaID()
 	// replyCh has buffer of 1 so that coordinator is not blocking if reply chan is not being read
 	replyCh := make(chan Saga, 1)
 	c.createCh <- createMsg{

@@ -4,69 +4,61 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
-	"log"
 	"net/http"
 	"strings"
 )
 
+// Errors for HTTP Requests
 var (
-	ErrInvalidHttpMethod = errors.New("invalid HTTP method")
+	ErrInvalidHTTPMethod = errors.New("invalid HTTP method")
 )
 
-func HttpReq(url, method, requestID string, body map[string]string) error {
+// HTTPReq issues an HTTP request based on the provided input
+func HTTPReq(url, method, requestID string, body map[string]string) (map[string]string, error) {
 	client := http.Client{}
 
 	switch strings.ToUpper(method) {
 	case "GET":
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		req.Header.Set("request-id", requestID)
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		defer resp.Body.Close()
+		var result map[string]string
 
-		respBody, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
+		json.NewDecoder(resp.Body).Decode(&result)
 
-		log.Println(respBody)
-	case "post":
+		return result, nil
+	case "POST":
 		reqBody, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
 		if err != nil {
-			return err
+			return nil, err
 		}
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("content-type", "application/json")
 		req.Header.Set("request-id", requestID)
 
 		resp, err := client.Do(req)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		defer resp.Body.Close()
+		var result map[string]string
 
-		respBody, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
+		json.NewDecoder(resp.Body).Decode(&result)
 
-		log.Println(respBody)
+		return result, nil
 	default:
-		return ErrInvalidHttpMethod
+		return nil, ErrInvalidHTTPMethod
 	}
-
-	return nil
 }

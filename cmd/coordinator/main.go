@@ -19,7 +19,7 @@ func main() {
 	flag.Parse()
 	config := sagas.DefaultConfig()
 
-	c := sagas.NewCoordinator(config)
+	c := sagas.NewCoordinator(config, sagas.NewBadgerDB(true))
 	defer c.Cleanup()
 
 	err := sagas.BookRoom(c, userID, roomID)

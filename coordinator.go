@@ -2,9 +2,6 @@ package sagas
 
 import (
 	"errors"
-	"os"
-
-	bolt "go.etcd.io/bbolt"
 )
 
 // Errors from incorrect coordinator logic
@@ -31,7 +28,7 @@ type createMsg struct {
 // Coordinator handles saga requests by calling RPCs and persisting logs to disk
 type Coordinator struct {
 	Config   *Config
-	db       *bolt.DB
+	logs     LogStore
 	sagas    map[uint64]Saga
 	requests map[uint64]chan Saga
 
@@ -40,12 +37,10 @@ type Coordinator struct {
 }
 
 // NewCoordinator creates a new coordinator based on a config
-func NewCoordinator(config *Config) *Coordinator {
-	db := OpenDB(config.Path)
-
+func NewCoordinator(config *Config, logStore LogStore) *Coordinator {
 	c := &Coordinator{
 		Config:   config,
-		db:       db,
+		logs:     logStore,
 		sagas:    make(map[uint64]Saga),
 		requests: make(map[uint64]chan Saga),
 
@@ -65,8 +60,8 @@ func NewCoordinator(config *Config) *Coordinator {
 // Recover reads logs from disks and reconstructs dags in memory
 func (c *Coordinator) Recover() {
 	// Repopulate all sagas into memory
-	for i := uint64(1); i <= c.LastIndex(); i++ {
-		log, err := c.GetLog(i)
+	for i := uint64(1); i <= c.logs.LastIndex(); i++ {
+		log, err := c.logs.GetLog(i)
 		if err != nil {
 			// Error must be ErrLogIndexNotFound so we just skip the index
 			continue
@@ -202,77 +197,37 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 
 	// Append to log
 	data := encodeSagaVertex(vertex)
-	c.AppendLog(sagaID, Vertex, data)
+	c.logs.AppendLog(sagaID, Vertex, data)
 
 	// Evaluate vertex's function
 	f := vertex.TFunc
-	err := HttpReq(f.URL, f.Method, f.RequestID, f.Body)
+
+	resp, err := HTTPReq(f.URL, f.Method, f.RequestID, f.Body)
+	status := EndT
 	if err != nil {
-		panic(err)
+		Error.Println(err)
+		// Store error to output
+		f.Resp["error"] = err.Error()
+		// Set status to abort
+		status = Abort
+	} else {
+		for k, v := range resp {
+			f.Resp[k] = v
+		}
+		for _, k := range vertex.TransferFields {
+			vertex.CFunc.Body[k] = f.Resp[k]
+		}
 	}
-	// switch fn {
-	// case "hotel_book":
-	// 	value, ok := fn.Input["userID"]
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputField)
-	// 	}
-	// 	userID, ok := value.(string)
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputType)
-	// 	}
-	// 	value, ok = fn.Input["roomID"]
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputField)
-	// 	}
-	// 	roomID, ok := value.(string)
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputType)
-	// 	}
-	// 	reservationID, err := hotels.BookRoom(c.hotelsClient, userID, roomID)
-	// 	input := vertex.CFunc.Input
-	// 	output := fn.Output
-	// 	status := EndT
-	// 	if err != nil {
-	// 		Error.Println(err)
-	// 		// Store error to output
-	// 		output["error"] = err.Error()
-	// 		// Set status to abort
-	// 		status = Abort
-	// 	} else {
-	// 		output["reservationID"] = reservationID
-	// 		input["reservationID"] = reservationID
-	// 	}
-	// 	// Create new TFunc storing updated output
-	// 	newTFunc := SagaFunc{
-	// 		FuncID:    fn.FuncID,
-	// 		RequestID: fn.RequestID,
-	// 		Input:     fn.Input,
-	// 		Output:    output,
-	// 	}
-	// 	// Create new CFunc storing new reservationID
-	// 	newCFunc := SagaFunc{
-	// 		FuncID:    vertex.CFunc.FuncID,
-	// 		RequestID: vertex.CFunc.RequestID,
-	// 		Input:     input,
-	// 		Output:    vertex.CFunc.Output,
-	// 	}
-	// 	// Create new SagaVertex
-	// 	newVertex := SagaVertex{
-	// 		VertexID: vertex.VertexID,
-	// 		TFunc:    newTFunc,
-	// 		CFunc:    newCFunc,
-	// 		Status:   status,
-	// 	}
-	// 	// Append to log
-	// 	c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
-	// 	// Send newVertex to update chan for coordinator to update its map of sagas
-	// 	c.updateCh <- updateMsg{
-	// 		sagaID: sagaID,
-	// 		vertex: newVertex,
-	// 	}
-	// default:
-	// 	panic(ErrInvalidFuncID)
-	// }
+	vertex.Status = status
+
+	// Append to log
+	c.logs.AppendLog(sagaID, Vertex, encodeSagaVertex(vertex))
+
+	// Send newVertex to update chan for coordinator to update its map of sagas
+	c.updateCh <- updateMsg{
+		sagaID: sagaID,
+		vertex: vertex,
+	}
 }
 
 // ProcessC runs a SagaVertex's CFunc
@@ -292,7 +247,7 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 
 	// Now vertex must either be EndT or StartC. Append to log
 	data := encodeSagaVertex(vertex)
-	c.AppendLog(sagaID, Vertex, data)
+	c.logs.AppendLog(sagaID, Vertex, data)
 
 	// Evaluate vertex's Cfunc
 	// fn := vertex.CFunc
@@ -378,7 +333,7 @@ func (c *Coordinator) Run() {
 				panic(ErrSagaIDAlreadyExists)
 			}
 			// Append new saga to log
-			c.AppendLog(sagaID, Graph, encodeSaga(saga))
+			c.logs.AppendLog(sagaID, Graph, encodeSaga(saga))
 			// Insert new saga and request and run new saga
 			c.sagas[sagaID] = saga
 			c.requests[sagaID] = msg.replyCh
@@ -389,12 +344,5 @@ func (c *Coordinator) Run() {
 
 // Cleanup removes saga coordinator persistent state
 func (c *Coordinator) Cleanup() {
-	err := c.db.Close()
-	if err != nil {
-		panic(err)
-	}
-	err = os.RemoveAll(c.Config.Path)
-	if err != nil {
-		panic(err)
-	}
+	c.logs.Close()
 }
