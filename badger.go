@@ -18,7 +18,15 @@ type Badger struct {
 
 // NewBadgerDB opens an in-memory BadgerDB
 func NewBadgerDB(path string, inMemory bool) *Badger {
-	db, err := badger.Open(badger.DefaultOptions(path).WithInMemory(true).WithEventLogging(false))
+	opts := badger.DefaultOptions("")
+	opts.InMemory = inMemory
+	opts.EventLogging = false
+	opts.Logger = nil
+	if !inMemory {
+		opts.ValueDir = path
+	}
+
+	db, err := badger.Open(opts)
 	if err != nil {
 		panic(err)
 	}
@@ -31,6 +39,24 @@ func NewBadgerDB(path string, inMemory bool) *Badger {
 		panic(err)
 	}
 	logCounter, err := db.GetSequence([]byte("logs"), 100)
+	if err != nil {
+		panic(err)
+	}
+
+	err = db.Update(func(txn *badger.Txn) error {
+		log := Log{
+			Lsn:     0,
+			SagaID:  0,
+			LogType: InitLog,
+			Data:    []byte{0},
+		}
+		buf, err := utils.EncodeMsgPack(log)
+		if err != nil {
+			return err
+		}
+		key := append([]byte("log:"), utils.Uint64ToBytes(0)...)
+		return txn.Set(key, buf.Bytes())
+	})
 	if err != nil {
 		panic(err)
 	}

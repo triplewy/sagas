@@ -136,7 +136,7 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 		vertices[vID] = SagaVertex{
 			VertexID: vID,
 			TFunc: SagaFunc{
-				URL:       "localhost:51051/book",
+				URL:       "http://localhost:51051/book",
 				Method:    "POST",
 				RequestID: requestID1,
 				Body: map[string]string{
@@ -146,7 +146,7 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 				Resp: make(map[string]string),
 			},
 			CFunc: SagaFunc{
-				URL:       "localhost:51051/cancel",
+				URL:       "http://localhost:51051/cancel",
 				Method:    "POST",
 				RequestID: requestID2,
 				Body: map[string]string{
