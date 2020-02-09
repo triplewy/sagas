@@ -23,7 +23,7 @@ func BookRoom(c *Coordinator, userID, roomID string) error {
 		1: SagaVertex{
 			VertexID: 1,
 			TFunc: SagaFunc{
-				Addr:      "hotels/book",
+				URL:       "hotels/book",
 				Method:    "POST",
 				RequestID: requestID1,
 				Body: map[string]string{
@@ -33,7 +33,7 @@ func BookRoom(c *Coordinator, userID, roomID string) error {
 				Resp: make(map[string]string),
 			},
 			CFunc: SagaFunc{
-				Addr:      "hotel/cancel",
+				URL:       "hotel/cancel",
 				Method:    "POST",
 				RequestID: requestID2,
 				Body: map[string]string{
@@ -41,10 +41,11 @@ func BookRoom(c *Coordinator, userID, roomID string) error {
 				},
 				Resp: make(map[string]string),
 			},
-			Status: NotReached,
+			TransferFields: []string{"reservationID"},
+			Status:         NotReached,
 		},
 	}
-	saga := NewSaga(dag, vertices)
+	saga := Saga{DAG: dag, Vertices: vertices}
 	sagaID := c.NewSagaID()
 	// replyCh has buffer of 1 so that coordinator is not blocking if reply chan is not being read
 	replyCh := make(chan Saga, 1)
@@ -77,7 +78,7 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 		vertices[vID] = SagaVertex{
 			VertexID: vID,
 			TFunc: SagaFunc{
-				Addr:      "hotels/book",
+				URL:       "hotels/book",
 				Method:    "POST",
 				RequestID: requestID1,
 				Body: map[string]string{
@@ -87,7 +88,7 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 				Resp: make(map[string]string),
 			},
 			CFunc: SagaFunc{
-				Addr:      "hotel/cancel",
+				URL:       "hotel/cancel",
 				Method:    "POST",
 				RequestID: requestID2,
 				Body: map[string]string{
@@ -100,7 +101,7 @@ func BookMultipleRooms(c *Coordinator, userID string, roomIDs []string) error {
 		dag[vID] = map[VertexID]SagaEdge{}
 	}
 
-	saga := NewSaga(dag, vertices)
+	saga := Saga{DAG: dag, Vertices: vertices}
 	sagaID := c.NewSagaID()
 	// replyCh has buffer of 1 so that coordinator is not blocking if reply chan is not being read
 	replyCh := make(chan Saga, 1)

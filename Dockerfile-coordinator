@@ -6,8 +6,8 @@ COPY . .
 
 RUN go get -v -u ./...
 
-RUN go build -o /bin/hotels cmd/hotels/main.go
+RUN go build -o /bin/coordinator cmd/coordinator/main.go
 
 EXPOSE 50051
 
-ENTRYPOINT /bin/hotels
+ENTRYPOINT /bin/coordinator

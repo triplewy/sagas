@@ -2,7 +2,7 @@ version: "3.7"
 
 services:
   # Requires the build of the stubs first
-  hotels-server:
+  hotels:
     image: hotels
     expose:
       - "50051"
@@ -11,9 +11,9 @@ services:
     networks:
       envoymesh:
         aliases:
-          - hotels-server
+          - hotels
 
-  hotels-server-proxy:
+  hotels-proxy:
     image: envoyproxy/envoy:latest
     command: /usr/local/bin/envoy -c /etc/hotels-proxy.yaml --service-cluster hotels-proxy
     volumes:

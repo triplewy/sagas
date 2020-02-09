@@ -52,17 +52,18 @@ func (s Status) GoString() string {
 
 // Saga is a DAG of SagaVertices that keeps track of progress of a Saga transaction
 type Saga struct {
-	TopDownDAG map[VertexID]map[VertexID]SagaEdge
-	// BottomUpDAG map[VertexID]map[VertexID]SagaEdge
+	DAG      map[VertexID]map[VertexID]SagaEdge
 	Vertices map[VertexID]SagaVertex
 }
 
 // GoString implements fmt GoString interface
 func (s Saga) GoString() string {
-	return fmt.Sprintf("Saga{TopDownDAG: %v, Vertices: %#v}", s.TopDownDAG, s.Vertices)
+	return fmt.Sprintf("Saga{DAG: %v, Vertices: %#v}", s.DAG, s.Vertices)
 }
 
-// SagaVertex represents each vertex in a saga graph. Each vertex has a forward and compensating SagaFunc
+// SagaVertex represents each vertex in a saga graph. Each vertex has a forward and compensating SagaFunc.
+// Each SagaVertex should be able to rollback a forward transaction with its own data. This means that
+// rollbacks in a Saga do not have to be sequential
 type SagaVertex struct {
 	VertexID       VertexID
 	TFunc          SagaFunc
@@ -83,28 +84,11 @@ type SagaEdge struct {
 
 // SagaFunc provides information to call a function in the Saga
 type SagaFunc struct {
-	Addr      string
+	URL       string
 	Method    string
 	RequestID string
 	Body      map[string]string
 	Resp      map[string]string
-}
-
-// NewSaga creates a new saga from a dag and map of VertexIDs to vertices
-func NewSaga(dag map[VertexID]map[VertexID]SagaEdge, vertices map[VertexID]SagaVertex) Saga {
-	// reverseDag := SwitchGraphDirection(dag)
-
-	// // Just in case...
-	// originalDag := SwitchGraphDirection(reverseDag)
-	// if !cmp.Equal(dag, originalDag) {
-	// 	panic(ErrUnequivalentDAGs)
-	// }
-
-	return Saga{
-		TopDownDAG: dag,
-		// BottomUpDAG: reverseDag,
-		Vertices: vertices,
-	}
 }
 
 // SwitchGraphDirection returns the opposite direction equivalent of inputted DAG
@@ -126,7 +110,7 @@ func SwitchGraphDirection(dag map[VertexID]map[VertexID]struct{}) map[VertexID]m
 	return result
 }
 
-// CheckEquivalentDAGs checks if TopDownDAG and BottomUpDAG are logically equivalent
+// CheckEquivalentDAGs checks if DAG and BottomUpDAG are logically equivalent
 func CheckEquivalentDAGs(a, b map[VertexID]map[VertexID]struct{}) error {
 	// Check if both graphs have same amount of vertices
 	if len(a) != len(b) {
@@ -166,7 +150,8 @@ func CheckEquivalentDAGs(a, b map[VertexID]map[VertexID]struct{}) error {
 
 // CheckFinishedOrAbort checks if saga has finished or has been aborted.
 // If no abort in the saga, then all vertices must have status EndT to be finished.
-// If abort in the saga, then all vertices except aborted nodes must have status EndC to be finished.
+// If abort in the saga, then all vertices except aborted and not-reached vertexes
+// must have status EndC to be finished.
 func CheckFinishedOrAbort(vertices map[VertexID]SagaVertex) (finished, aborted bool) {
 	finished = true
 	finishedC := true
@@ -181,8 +166,8 @@ func CheckFinishedOrAbort(vertices map[VertexID]SagaVertex) (finished, aborted b
 		if v.Status != EndT {
 			finished = false
 		}
-		// If status is not abort and not EndC, then impossible for saga to be finished compensating
-		if v.Status != Abort && v.Status != EndC {
+		// If status is not abort, notReached, nor EndC, then impossible for saga to be finished compensating
+		if !(v.Status == Abort || v.Status == EndC || v.Status == NotReached) {
 			finishedC = false
 		}
 	}
@@ -193,30 +178,29 @@ func CheckFinishedOrAbort(vertices map[VertexID]SagaVertex) (finished, aborted b
 	return
 }
 
-// CheckValidSaga returns error if any of 3 conditions below are met:
-// 1. Saga has a compensating status (StartC, EndC) without an Abort status
-// 2. Child has status Abort and parent has status NotReached or StartT or Abort
-// 3. Child has status other than NotReached or Abort and parent has status other than EndT
+// CheckValidSaga returns error if any of saga is in invalid state
 func CheckValidSaga(saga Saga, aborted bool) error {
-	if aborted {
+	// If not aborted, saga is valid iff:
+	// 1. Each vertex is either NotReached, StartT, EndT
+	// 2. Parent is not EndT, then child should be NotReached
+	if !aborted {
 		// For each vertex in the saga...
 		for parentID, parent := range saga.Vertices {
-			children, ok := saga.TopDownDAG[parentID]
+			// #1
+			if !(parent.Status == NotReached || parent.Status == StartT || parent.Status == EndT) {
+				return ErrInvalidSaga
+			}
+			children, ok := saga.DAG[parentID]
 			if !ok {
 				return ErrVertexIDNotFound
 			}
-			// For each vertex's children...
-			for childVertexID := range children {
-				child, ok := saga.Vertices[childVertexID]
+			for childID := range children {
+				child, ok := saga.Vertices[childID]
 				if !ok {
 					return ErrVertexIDNotFound
 				}
-				// Invariant 2
-				if child.Status == Abort && (parent.Status == NotReached || parent.Status == StartT || parent.Status == Abort) {
-					return ErrInvalidSaga
-				}
-				// Invariant 3
-				if child.Status != NotReached && child.Status != Abort && parent.Status != EndT {
+				// #2
+				if parent.Status != EndT && child.Status != NotReached {
 					return ErrInvalidSaga
 				}
 			}
@@ -224,29 +208,22 @@ func CheckValidSaga(saga Saga, aborted bool) error {
 		return nil
 	}
 
-	// For each vertex in the saga...
-	for childID, child := range saga.Vertices {
-		// Invariant 1
-		if child.Status == StartC || child.Status == EndC {
-			return ErrInvalidSaga
+	// If aborted, saga is valid iff: Parent is NotReached, StartT, or Abort, then child should be NotReached
+	for parentID, parent := range saga.Vertices {
+		children, ok := saga.DAG[parentID]
+		if !ok {
+			return ErrVertexIDNotFound
 		}
-		// parents, ok := saga.BottomUpDAG[childID]
-		// if !ok {
-		// 	return ErrVertexIDNotFound
-		// }
-		// For each vertex's parents...
-		// for parentID := range parents {
-		// 	parent, ok := saga.Vertices[parentID]
-		// 	if !ok {
-		// 		return ErrVertexIDNotFound
-		// 	}
-		// 	// Invariant 2
-		// 	if child.Status != NotReached && parent.Status != EndT {
-		// 		return ErrInvalidSaga
-		// 	}
-		// }
+		for childID := range children {
+			child, ok := saga.Vertices[childID]
+			if !ok {
+				return ErrVertexIDNotFound
+			}
+			if (parent.Status == NotReached || parent.Status == StartT || parent.Status == Abort) && child.Status != NotReached {
+				return ErrInvalidSaga
+			}
+		}
 	}
-
 	return nil
 }
 

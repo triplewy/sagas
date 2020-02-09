@@ -26,12 +26,15 @@ func TestLog(t *testing.T) {
 			},
 			{
 				name:    "vertex",
-				data:    SagaVertex{VertexID: 0, TFunc: SagaFunc{}, CFunc: SagaFunc{}, Status: NotReached},
+				data:    SagaVertex{VertexID: 0, Status: NotReached},
 				logType: Vertex,
 			},
 			{
-				name:    "graph",
-				data:    NewSaga(map[VertexID]map[VertexID]struct{}{1: {}}, map[VertexID]SagaVertex{1: SagaVertex{VertexID: 0, TFunc: SagaFunc{}, CFunc: SagaFunc{}, Status: NotReached}}),
+				name: "graph",
+				data: Saga{
+					DAG:      map[VertexID]map[VertexID]SagaEdge{1: {}},
+					Vertices: map[VertexID]SagaVertex{1: SagaVertex{VertexID: 0, Status: NotReached}},
+				},
 				logType: Graph,
 			},
 		}
@@ -106,7 +109,7 @@ func TestLog(t *testing.T) {
 
 	t.Run("concurrent appends", func(t *testing.T) {
 		logType := Vertex
-		vertex := SagaVertex{VertexID: 0, TFunc: SagaFunc{}, CFunc: SagaFunc{}, Status: NotReached}
+		vertex := SagaVertex{VertexID: 0, Status: NotReached}
 		data := encodeSagaVertex(vertex)
 		startIndex := s.LastIndex()
 		var wg sync.WaitGroup

@@ -127,95 +127,60 @@ func (c *Coordinator) RunSaga(sagaID uint64, saga Saga) {
 
 // RollbackSaga calls necessary compensating functions to undo saga
 func (c *Coordinator) RollbackSaga(sagaID uint64, saga Saga) {
-	// Find highest vertices
-	var highest []VertexID
-	for vID, parents := range saga.BottomUpDAG {
-		if len(parents) == 0 {
-			highest = append(highest, vID)
+	// Each vertex that is not Abort, NotReached, or EndC still needs to fully rollback
+	for _, vertex := range saga.Vertices {
+		if !(vertex.Status == Abort || vertex.Status == EndC || vertex.Status == NotReached) {
+			go c.ProcessC(sagaID, vertex)
 		}
-	}
-
-	// Find list of vertices to process using bfs
-	process := make(map[VertexID]SagaVertex)
-	for len(highest) > 0 {
-		// pop first vertex off of highest
-		var parentID VertexID
-		parentID, highest = highest[0], highest[1:]
-
-		// Check if vertex can be skipped. Conditions are: NotReached, EndC, Abort
-		parent, ok := saga.Vertices[parentID]
-		if !ok {
-			panic(ErrVertexIDNotFound)
-		}
-		if parent.Status == NotReached || parent.Status == EndC || parent.Status == Abort {
-			continue
-		}
-
-		canProcess := true
-		// Iterate through vertex children to see if all have NotReached, EndC, or Abort
-		for childID := range saga.TopDownDAG[parentID] {
-			child, ok := saga.Vertices[childID]
-			if !ok {
-				panic(ErrVertexIDNotFound)
-			}
-			// If a child has not completed rolled back, append child to stack and set canProcess for this vertex to false
-			if child.Status == StartT || child.Status == EndT || child.Status == StartC {
-				highest = append(highest, childID)
-				canProcess = false
-			}
-		}
-		if canProcess {
-			process[parentID] = parent
-		}
-	}
-
-	// Run each vertex to process on a separate goroutine
-	for _, vertex := range process {
-		go c.ProcessC(sagaID, vertex)
 	}
 }
 
 // ContinueSaga runs saga forward
 func (c *Coordinator) ContinueSaga(sagaID uint64, saga Saga) {
-	// Find lowest vertices
-	var lowest []VertexID
-	for vID, children := range saga.TopDownDAG {
-		if len(children) == 0 {
-			lowest = append(lowest, vID)
+	// Build set of vertices that are children
+	seen := make(map[VertexID]struct{}, 0)
+	for _, children := range saga.DAG {
+		for id := range children {
+			seen[id] = struct{}{}
+		}
+	}
+
+	var highest []VertexID
+	// For all vertices, the ones not in seen are highest vertices
+	for id := range saga.Vertices {
+		isChild := func() bool {
+			for seenID := range seen {
+				if seenID == id {
+					return true
+				}
+			}
+			return false
+		}()
+		if !isChild {
+			highest = append(highest, id)
 		}
 	}
 
 	// Find list of vertices to process using bfs
 	process := make(map[VertexID]SagaVertex)
-	for len(lowest) > 0 {
-		// pop first vertex off of lowest
-		var childID VertexID
-		childID, lowest = lowest[0], lowest[1:]
+	var id VertexID
 
-		// Check if vertex is already finished
-		child, ok := saga.Vertices[childID]
+	for len(highest) > 0 {
+		// pop first vertex off of highest
+		id, highest = highest[0], highest[1:]
+
+		v, ok := saga.Vertices[id]
 		if !ok {
 			panic(ErrVertexIDNotFound)
 		}
-		if child.Status == EndT {
-			continue
-		}
-
-		canProcess := true
-		// Iterate through vertex parents to see if all have finished
-		for parentID := range saga.BottomUpDAG[childID] {
-			parent, ok := saga.Vertices[parentID]
-			if !ok {
-				panic(ErrVertexIDNotFound)
+		// if vertex is not EndT, add to process
+		if v.Status != EndT {
+			process[id] = v
+		} else {
+			// add all children to highest
+			for childID := range saga.DAG[id] {
+				highest = append(highest, childID)
 			}
-			// If a parent has not ended, append parent to stack and set canProcess for this vertex to false
-			if parent.Status != EndT {
-				lowest = append(lowest, parentID)
-				canProcess = false
-			}
-		}
-		if canProcess {
-			process[childID] = child
 		}
 	}
 
@@ -240,8 +205,12 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 	c.AppendLog(sagaID, Vertex, data)
 
 	// Evaluate vertex's function
-	fn := vertex.TFunc
-	switch fn.FuncID {
+	f := vertex.TFunc
+	err := HttpReq(f.URL, f.Method, f.RequestID, f.Body)
+	if err != nil {
+		panic(err)
+	}
+	// switch fn {
 	// case "hotel_book":
 	// 	value, ok := fn.Input["userID"]
 	// 	if !ok {
@@ -301,9 +270,9 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 	// 		sagaID: sagaID,
 	// 		vertex: newVertex,
 	// 	}
-	default:
-		panic(ErrInvalidFuncID)
-	}
+	// default:
+	// 	panic(ErrInvalidFuncID)
+	// }
 }
 
 // ProcessC runs a SagaVertex's CFunc
@@ -326,8 +295,8 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 	c.AppendLog(sagaID, Vertex, data)
 
 	// Evaluate vertex's Cfunc
-	fn := vertex.CFunc
-	switch fn.FuncID {
+	// fn := vertex.CFunc
+	// switch fn.FuncID {
 	// case "hotel_cancel":
 	// 	value, ok := fn.Input["userID"]
 	// 	if !ok {
@@ -366,9 +335,9 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 	// 		sagaID: sagaID,
 	// 		vertex: newVertex,
 	// 	}
-	default:
-		panic(ErrInvalidFuncID)
-	}
+	// default:
+	// 	panic(ErrInvalidFuncID)
+	// }
 }
 
 // Run reads from a channel to serialize updates to log and corresponding sagas
@@ -392,9 +361,8 @@ func (c *Coordinator) Run() {
 			}
 			newVertices[vertex.VertexID] = vertex
 			newSaga := Saga{
-				TopDownDAG:  saga.TopDownDAG,
-				BottomUpDAG: saga.BottomUpDAG,
-				Vertices:    newVertices,
+				DAG:      saga.DAG,
+				Vertices: newVertices,
 			}
 			// Update coordinator map and run updated saga
 			c.sagas[sagaID] = newSaga
