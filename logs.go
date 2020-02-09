@@ -3,6 +3,8 @@ package sagas
 import (
 	"errors"
 	"fmt"
+
+	"github.com/triplewy/sagas/utils"
 )
 
 // ErrLogIndexNotFound is used when a log does not exist at a specified index
@@ -57,4 +59,21 @@ func (log Log) GoString() string {
 		}
 	}()
 	return fmt.Sprintf("Log{\n\tLsn: %v,\n\tSagaID: %v,\n\tLogType: %#v,\n\tData: %v\n}", log.Lsn, log.SagaID, log.LogType, data)
+}
+
+func encodeLog(log Log) []byte {
+	buf, err := utils.EncodeMsgPack(log)
+	if err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
+func decodeLog(buf []byte) Log {
+	var out Log
+	err := utils.DecodeMsgPack(buf, &out)
+	if err != nil {
+		panic(err)
+	}
+	return out
 }

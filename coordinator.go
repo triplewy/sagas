@@ -249,50 +249,32 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 	data := encodeSagaVertex(vertex)
 	c.logs.AppendLog(sagaID, VertexLog, data)
 
-	// Evaluate vertex's Cfunc
-	// fn := vertex.CFunc
-	// switch fn.FuncID {
-	// case "hotel_cancel":
-	// 	value, ok := fn.Input["userID"]
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputField)
-	// 	}
-	// 	userID, ok := value.(string)
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputType)
-	// 	}
-	// 	value, ok = fn.Input["reservationID"]
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputField)
-	// 	}
-	// 	reservationID, ok := value.(string)
-	// 	if !ok {
-	// 		panic(ErrInvalidFuncInputType)
-	// 	}
-	// 	err := hotels.CancelRoom(c.hotelsClient, userID, reservationID)
-	// 	if err != nil {
-	// 		// Simple wait and retry
-	// 		time.Sleep(3 * time.Second)
-	// 		err = hotels.CancelRoom(c.hotelsClient, userID, reservationID)
-	// 	}
+	// Evaluate vertex's function
+	f := vertex.CFunc
 
-	// 	// Create new SagaVertex
-	// 	newVertex := SagaVertex{
-	// 		VertexID: vertex.VertexID,
-	// 		TFunc:    vertex.TFunc,
-	// 		CFunc:    vertex.CFunc,
-	// 		Status:   EndC,
-	// 	}
-	// 	// Append to log
-	// 	c.AppendLog(sagaID, Vertex, encodeSagaVertex(newVertex))
-	// 	// Send newVertex to update chan for coordinator to update its map of sagas
-	// 	c.updateCh <- updateMsg{
-	// 		sagaID: sagaID,
-	// 		vertex: newVertex,
-	// 	}
-	// default:
-	// 	panic(ErrInvalidFuncID)
-	// }
+	resp, err := HTTPReq(f.URL, f.Method, f.RequestID, f.Body)
+	status := EndC
+	if err != nil {
+		Error.Println(err)
+		// Store error to output
+		f.Resp["error"] = err.Error()
+		// set status to startC because did not succeed
+		status = StartC
+	} else {
+		for k, v := range resp {
+			f.Resp[k] = v
+		}
+	}
+	vertex.Status = status
+
+	// Append to log
+	c.logs.AppendLog(sagaID, VertexLog, encodeSagaVertex(vertex))
+
+	// Send newVertex to update chan for coordinator to update its map of sagas
+	c.updateCh <- updateMsg{
+		sagaID: sagaID,
+		vertex: vertex,
+	}
 }
 
 // Run reads from a channel to serialize updates to log and corresponding sagas
@@ -339,4 +321,5 @@ func (c *Coordinator) Run() {
 // Cleanup removes saga coordinator persistent state
 func (c *Coordinator) Cleanup() {
 	c.logs.Close()
+	c.logs.RemoveAll()
 }

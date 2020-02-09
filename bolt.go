@@ -156,6 +156,10 @@ func (b *Bolt) Close() {
 	if err := b.db.Close(); err != nil {
 		panic(err)
 	}
+}
+
+// RemoveAll removes all db data on disk
+func (b *Bolt) RemoveAll() {
 	if err := os.RemoveAll(b.path); err != nil {
 		panic(err)
 	}

@@ -1,6 +1,7 @@
 package sagas
 
 import (
+	"os"
 	"strconv"
 
 	"github.com/dgraph-io/badger"
@@ -18,13 +19,14 @@ type Badger struct {
 
 // NewBadgerDB opens an in-memory BadgerDB
 func NewBadgerDB(path string, inMemory bool) *Badger {
-	opts := badger.DefaultOptions("")
+	if inMemory {
+		path = ""
+	}
+
+	opts := badger.DefaultOptions(path)
 	opts.InMemory = inMemory
 	opts.EventLogging = false
 	opts.Logger = nil
-	if !inMemory {
-		opts.ValueDir = path
-	}
 
 	db, err := badger.Open(opts)
 	if err != nil {
@@ -43,31 +45,17 @@ func NewBadgerDB(path string, inMemory bool) *Badger {
 		panic(err)
 	}
 
-	err = db.Update(func(txn *badger.Txn) error {
-		log := Log{
-			Lsn:     0,
-			SagaID:  0,
-			LogType: InitLog,
-			Data:    []byte{0},
-		}
-		buf, err := utils.EncodeMsgPack(log)
-		if err != nil {
-			return err
-		}
-		key := append([]byte("log:"), utils.Uint64ToBytes(0)...)
-		return txn.Set(key, buf.Bytes())
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	return &Badger{
+	b := &Badger{
 		path:        path,
 		db:          db,
 		reqCounter:  reqCounter,
 		sagaCounter: sagaCounter,
 		logCounter:  logCounter,
 	}
+
+	b.AppendLog(0, InitLog, []byte{0})
+
+	return b
 }
 
 // NewSagaID retrieves a unique saga ID by incrementing
@@ -92,15 +80,17 @@ func (b *Badger) NewRequestID() (requestID string) {
 // LastIndex returns the last written log index
 func (b *Badger) LastIndex() (index uint64) {
 	err := b.db.View(func(txn *badger.Txn) error {
+		prefix := []byte("log:")
+
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
 		opts.Reverse = true
-		opts.Prefix = []byte("log:")
+		opts.Prefix = prefix
 
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		it.Rewind()
+		it.Seek(append(prefix, 0xFF))
 
 		if !it.Valid() {
 			return nil
@@ -131,14 +121,11 @@ func (b *Badger) AppendLog(sagaID uint64, logType LogType, data []byte) {
 			LogType: logType,
 			Data:    data,
 		}
-		buf, err := utils.EncodeMsgPack(log)
-		if err != nil {
-			return err
-		}
+		buf := encodeLog(log)
 
 		key := append([]byte("log:"), utils.Uint64ToBytes(index)...)
 
-		return txn.Set(key, buf.Bytes())
+		return txn.Set(key, buf)
 	})
 	if err != nil {
 		panic(err)
@@ -159,12 +146,7 @@ func (b *Badger) GetLog(index uint64) (Log, error) {
 	if err != nil {
 		panic(err)
 	}
-	var log Log
-	err = utils.DecodeMsgPack(valCopy, &log)
-	if err != nil {
-		panic(err)
-	}
-	return log, nil
+	return decodeLog(valCopy), nil
 }
 
 // Close releases all counters and closes badgerDB
@@ -177,5 +159,14 @@ func (b *Badger) Close() {
 	}
 	if err := b.db.Close(); err != nil {
 		panic(err)
+	}
+}
+
+// RemoveAll removes all db data on disk
+func (b *Badger) RemoveAll() {
+	if b.path != "" {
+		if err := os.RemoveAll(b.path); err != nil {
+			panic(err)
+		}
 	}
 }
