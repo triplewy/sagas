@@ -9,6 +9,7 @@ import (
 
 // Badger implements LogStore interface
 type Badger struct {
+	path        string
 	db          *badger.DB
 	reqCounter  *badger.Sequence
 	sagaCounter *badger.Sequence
@@ -16,8 +17,8 @@ type Badger struct {
 }
 
 // NewBadgerDB opens an in-memory BadgerDB
-func NewBadgerDB(inMemory bool) *Badger {
-	db, err := badger.Open(badger.DefaultOptions("").WithInMemory(true))
+func NewBadgerDB(path string, inMemory bool) *Badger {
+	db, err := badger.Open(badger.DefaultOptions(path).WithInMemory(true).WithEventLogging(false))
 	if err != nil {
 		panic(err)
 	}
@@ -35,6 +36,7 @@ func NewBadgerDB(inMemory bool) *Badger {
 	}
 
 	return &Badger{
+		path:        path,
 		db:          db,
 		reqCounter:  reqCounter,
 		sagaCounter: sagaCounter,

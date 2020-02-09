@@ -13,19 +13,19 @@ type LogType int
 
 // Enum for LogType
 const (
-	Init LogType = iota + 1
-	Graph
-	Vertex
+	InitLog LogType = iota + 1
+	GraphLog
+	VertexLog
 )
 
 // GoString implements fmt GoString interface
 func (t LogType) GoString() string {
 	switch t {
-	case Init:
+	case InitLog:
 		return "Init"
-	case Graph:
+	case GraphLog:
 		return "Graph"
-	case Vertex:
+	case VertexLog:
 		return "Vertex"
 	default:
 		return "Unknown"
@@ -44,12 +44,12 @@ type Log struct {
 func (log Log) GoString() string {
 	data := func() string {
 		switch log.LogType {
-		case Init:
+		case InitLog:
 			return "{}"
-		case Graph:
+		case GraphLog:
 			saga := decodeSaga(log.Data)
 			return saga.GoString()
-		case Vertex:
+		case VertexLog:
 			vertex := decodeSagaVertex(log.Data)
 			return vertex.GoString()
 		default:

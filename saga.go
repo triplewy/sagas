@@ -15,7 +15,7 @@ var (
 )
 
 // VertexID is a unique id representing each vertex in each saga
-type VertexID uint64
+type VertexID string
 
 // Status is a possible condition of a transaction in a saga
 type Status int

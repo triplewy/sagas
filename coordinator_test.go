@@ -16,7 +16,7 @@ func TestCoordinator(t *testing.T) {
 	server, h := hotels.NewServer(config.HotelsAddr)
 	defer server.GracefulStop()
 
-	c := NewCoordinator(config)
+	c := NewCoordinator(config, NewBadgerDB(config.Path, config.InMemory))
 	defer c.Cleanup()
 
 	t.Run("1 transaction", func(t *testing.T) {
@@ -117,14 +117,14 @@ func TestCoordinatorFailure(t *testing.T) {
 			_, ok := h.Rooms.Get("room5")
 			assert.Assert(t, !ok)
 
-			c := NewCoordinator(config)
+			c := NewCoordinator(config, NewBadgerDB(config.Path, config.InMemory))
 			defer c.Cleanup()
 
 			h.BlockNetwork.Store(false)
 
 			time.Sleep(2 * time.Second)
 
-			lastLog, err := c.GetLog(c.LastIndex())
+			lastLog, err := c.logs.GetLog(c.logs.LastIndex())
 			assert.NilError(t, err)
 
 			fmt.Printf("%#v\n", lastLog)

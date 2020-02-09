@@ -2,29 +2,29 @@ package main
 
 import (
 	"flag"
-	"log"
+	"os"
+	"os/signal"
 
 	"github.com/triplewy/sagas"
 )
 
-var userID string
-var roomID string
+var addr string
 
 func init() {
-	flag.StringVar(&userID, "user", "user0", "userID used in saga")
-	flag.StringVar(&roomID, "room", "room0", "roomID used in saga")
+	flag.StringVar(&addr, "addr", ":50050", "server address")
 }
 
 func main() {
 	flag.Parse()
 	config := sagas.DefaultConfig()
 
-	c := sagas.NewCoordinator(config, sagas.NewBadgerDB(true))
+	c := sagas.NewCoordinator(config, sagas.NewBadgerDB(config.Path, config.InMemory))
 	defer c.Cleanup()
 
-	err := sagas.BookRoom(c, userID, roomID)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("saga successful!")
+	s := sagas.NewServer(addr, c)
+	defer s.GracefulStop()
+
+	terminate := make(chan os.Signal, 1)
+	signal.Notify(terminate, os.Interrupt)
+	<-terminate
 }

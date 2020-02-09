@@ -38,7 +38,7 @@ func NewBoltDB(path string) *Bolt {
 		initLog := Log{
 			Lsn:     0,
 			SagaID:  0,
-			LogType: Init,
+			LogType: InitLog,
 			Data:    []byte{0},
 		}
 		buf, err := utils.EncodeMsgPack(initLog)

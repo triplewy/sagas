@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package sagas;
+
+service Coordinator { rpc StartSagaRPC(SagaReq) returns (SagaResp); }
+
+message Vertex {
+  string id = 1;
+  Func t = 2;
+  Func c = 3;
+  repeated string transfer_fields = 4;
+}
+
+message Func {
+  string url = 1;
+  string method = 2;
+  map<string, string> body = 3;
+}
+
+message Edge {
+  string start_id = 1;
+  string end_id = 2;
+  repeated string transfer_fields = 3;
+}
+
+message SagaReq {
+  map<string, Vertex> vertices = 1;
+  repeated Edge edges = 2;
+}
+
+message SagaResp {}

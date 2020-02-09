@@ -3,6 +3,7 @@ package hotels
 import (
 	context "context"
 	"errors"
+	"log"
 	"math/rand"
 	"net"
 	"time"
@@ -43,6 +44,8 @@ func NewServer(addr string) (*grpc.Server, *Hotels) {
 
 // Authorization unary interceptor function to handle authorize per RPC call
 func serverInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	log.Println(info.FullMethod)
+
 	h, ok := info.Server.(*Hotels)
 	if !ok {
 		return nil, serverError(ErrInvalidServer)

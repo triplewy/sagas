@@ -1,5 +1,6 @@
 package sagas
 
+// LogStore is an interface for coordinator to store logs
 type LogStore interface {
 	NewSagaID() uint64
 	NewRequestID() string

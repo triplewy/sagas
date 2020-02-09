@@ -67,15 +67,15 @@ func (c *Coordinator) Recover() {
 			continue
 		}
 		switch log.LogType {
-		case Init:
+		case InitLog:
 			continue
-		case Graph:
+		case GraphLog:
 			if _, ok := c.sagas[log.SagaID]; ok {
 				panic("multiple graphs with same sagaID")
 			}
 			saga := decodeSaga(log.Data)
 			c.sagas[log.SagaID] = saga
-		case Vertex:
+		case VertexLog:
 			saga, ok := c.sagas[log.SagaID]
 			if !ok {
 				panic("log of vertex has sagaID that does not exist")
@@ -197,7 +197,7 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 
 	// Append to log
 	data := encodeSagaVertex(vertex)
-	c.logs.AppendLog(sagaID, Vertex, data)
+	c.logs.AppendLog(sagaID, VertexLog, data)
 
 	// Evaluate vertex's function
 	f := vertex.TFunc
@@ -221,7 +221,7 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 	vertex.Status = status
 
 	// Append to log
-	c.logs.AppendLog(sagaID, Vertex, encodeSagaVertex(vertex))
+	c.logs.AppendLog(sagaID, VertexLog, encodeSagaVertex(vertex))
 
 	// Send newVertex to update chan for coordinator to update its map of sagas
 	c.updateCh <- updateMsg{
@@ -247,7 +247,7 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 
 	// Now vertex must either be EndT or StartC. Append to log
 	data := encodeSagaVertex(vertex)
-	c.logs.AppendLog(sagaID, Vertex, data)
+	c.logs.AppendLog(sagaID, VertexLog, data)
 
 	// Evaluate vertex's Cfunc
 	// fn := vertex.CFunc
@@ -306,23 +306,17 @@ func (c *Coordinator) Run() {
 			if !ok {
 				panic(ErrSagaIDNotFound)
 			}
-			// Create new vertices and new saga
-			newVertices := make(map[VertexID]SagaVertex, len(saga.Vertices))
-			for id, v := range saga.Vertices {
-				newVertices[id] = v
+			saga.Vertices[vertex.VertexID] = vertex
+			for childID, edge := range saga.DAG[vertex.VertexID] {
+				child, ok := saga.Vertices[childID]
+				if !ok {
+					panic(ErrVertexIDNotFound)
+				}
+				for _, field := range edge.Fields {
+					child.TFunc.Body[field] = vertex.TFunc.Resp[field]
+				}
 			}
-			if _, ok := newVertices[vertex.VertexID]; !ok {
-				panic(ErrVertexIDNotFound)
-			}
-			newVertices[vertex.VertexID] = vertex
-			newSaga := Saga{
-				DAG:      saga.DAG,
-				Vertices: newVertices,
-			}
-			// Update coordinator map and run updated saga
-			c.sagas[sagaID] = newSaga
-			c.RunSaga(sagaID, newSaga)
-
+			c.RunSaga(sagaID, saga)
 		case msg := <-c.createCh:
 			sagaID := msg.sagaID
 			saga := msg.saga
@@ -333,7 +327,7 @@ func (c *Coordinator) Run() {
 				panic(ErrSagaIDAlreadyExists)
 			}
 			// Append new saga to log
-			c.logs.AppendLog(sagaID, Graph, encodeSaga(saga))
+			c.logs.AppendLog(sagaID, GraphLog, encodeSaga(saga))
 			// Insert new saga and request and run new saga
 			c.sagas[sagaID] = saga
 			c.requests[sagaID] = msg.replyCh

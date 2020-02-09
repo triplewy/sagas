@@ -15,61 +15,61 @@ func TestSaga(t *testing.T) {
 			{
 				name: "1 vertex",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: {},
+					"1": {},
 				},
 			},
 			{
 				name: "2 vertices parallel",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: {},
-					2: {},
+					"1": {},
+					"2": {},
 				},
 			},
 			{
 				name: "2 vertices sequential",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: map[VertexID]struct{}{2: struct{}{}},
-					2: {},
+					"1": map[VertexID]struct{}{"2": struct{}{}},
+					"2": {},
 				},
 			},
 			{
 				name: "3 vertices parallel",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: {},
-					2: {},
-					3: {},
+					"1": {},
+					"2": {},
+					"3": {},
 				},
 			},
 			{
 				name: "3 vertices sequential",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: map[VertexID]struct{}{2: struct{}{}},
-					2: map[VertexID]struct{}{3: struct{}{}},
-					3: {},
+					"1": map[VertexID]struct{}{"2": struct{}{}},
+					"2": map[VertexID]struct{}{"3": struct{}{}},
+					"3": {},
 				},
 			},
 			{
 				name: "3 vertices top peak",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: map[VertexID]struct{}{2: struct{}{}, 3: struct{}{}},
-					2: {},
-					3: {},
+					"1": map[VertexID]struct{}{"2": struct{}{}, "3": struct{}{}},
+					"2": {},
+					"3": {},
 				},
 			},
 			{
 				name: "3 vertices bottom peak",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: map[VertexID]struct{}{3: struct{}{}},
-					2: map[VertexID]struct{}{3: struct{}{}},
-					3: {},
+					"1": map[VertexID]struct{}{"3": struct{}{}},
+					"2": map[VertexID]struct{}{"3": struct{}{}},
+					"3": {},
 				},
 			},
 			{
 				name: "3 vertices 2 sequential 1 parallel",
 				dag: map[VertexID]map[VertexID]struct{}{
-					1: map[VertexID]struct{}{2: struct{}{}},
-					2: {},
-					3: {},
+					"1": map[VertexID]struct{}{"2": struct{}{}},
+					"2": {},
+					"3": {},
 				},
 			},
 		}
@@ -100,7 +100,7 @@ func TestSaga(t *testing.T) {
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
-					vertices := map[VertexID]SagaVertex{1: SagaVertex{VertexID: 1, Status: tt.status}}
+					vertices := map[VertexID]SagaVertex{"1": SagaVertex{VertexID: "1", Status: tt.status}}
 					finished, aborted := CheckFinishedOrAbort(vertices)
 					assert.Assert(t, finished == tt.expectFinished && aborted == tt.expectAborted)
 				})
@@ -135,8 +135,8 @@ func TestSaga(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					vertices := map[VertexID]SagaVertex{
-						1: SagaVertex{VertexID: 1, Status: tt.status1},
-						2: SagaVertex{VertexID: 2, Status: tt.status2},
+						"1": SagaVertex{VertexID: "1", Status: tt.status1},
+						"2": SagaVertex{VertexID: "2", Status: tt.status2},
 					}
 					finished, aborted := CheckFinishedOrAbort(vertices)
 					assert.Assert(t, finished == tt.expectFinished && aborted == tt.expectAborted)
@@ -147,7 +147,7 @@ func TestSaga(t *testing.T) {
 
 	t.Run("valid saga", func(t *testing.T) {
 		t.Run("1 vertex", func(t *testing.T) {
-			dag := map[VertexID]map[VertexID]SagaEdge{1: {}}
+			dag := map[VertexID]map[VertexID]SagaEdge{"1": {}}
 
 			tests := []struct {
 				name        string
@@ -164,7 +164,7 @@ func TestSaga(t *testing.T) {
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
-					vertices := map[VertexID]SagaVertex{1: SagaVertex{VertexID: 1, Status: tt.status}}
+					vertices := map[VertexID]SagaVertex{"1": SagaVertex{VertexID: "1", Status: tt.status}}
 					saga := Saga{DAG: dag, Vertices: vertices}
 					_, aborted := CheckFinishedOrAbort(saga.Vertices)
 					assert.Equal(t, CheckValidSaga(saga, aborted), tt.expectError)
@@ -174,7 +174,7 @@ func TestSaga(t *testing.T) {
 
 		t.Run("2 vertices", func(t *testing.T) {
 			t.Run("parallel", func(t *testing.T) {
-				dag := map[VertexID]map[VertexID]SagaEdge{1: {}, 2: {}}
+				dag := map[VertexID]map[VertexID]SagaEdge{"1": {}, "2": {}}
 				tests := []struct {
 					name        string
 					status1     Status
@@ -212,8 +212,8 @@ func TestSaga(t *testing.T) {
 				for _, tt := range tests {
 					t.Run(tt.name, func(t *testing.T) {
 						vertices := map[VertexID]SagaVertex{
-							1: SagaVertex{VertexID: 1, Status: tt.status1},
-							2: SagaVertex{VertexID: 2, Status: tt.status2},
+							"1": SagaVertex{VertexID: "1", Status: tt.status1},
+							"2": SagaVertex{VertexID: "2", Status: tt.status2},
 						}
 						saga := Saga{DAG: dag, Vertices: vertices}
 						_, aborted := CheckFinishedOrAbort(saga.Vertices)
@@ -224,7 +224,7 @@ func TestSaga(t *testing.T) {
 
 			// Order matters
 			t.Run("sequential", func(t *testing.T) {
-				dag := map[VertexID]map[VertexID]SagaEdge{1: {2: SagaEdge{}}, 2: {}}
+				dag := map[VertexID]map[VertexID]SagaEdge{"1": {"2": SagaEdge{}}, "2": {}}
 				tests := []struct {
 					name        string
 					status1     Status
@@ -277,8 +277,8 @@ func TestSaga(t *testing.T) {
 				for _, tt := range tests {
 					t.Run(tt.name, func(t *testing.T) {
 						vertices := map[VertexID]SagaVertex{
-							1: SagaVertex{VertexID: 1, Status: tt.status1},
-							2: SagaVertex{VertexID: 2, Status: tt.status2},
+							"1": SagaVertex{VertexID: "1", Status: tt.status1},
+							"2": SagaVertex{VertexID: "2", Status: tt.status2},
 						}
 						saga := Saga{DAG: dag, Vertices: vertices}
 						_, aborted := CheckFinishedOrAbort(saga.Vertices)
@@ -290,9 +290,9 @@ func TestSaga(t *testing.T) {
 
 		t.Run("3 vertices", func(t *testing.T) {
 			dag := map[VertexID]map[VertexID]SagaEdge{
-				1: {2: SagaEdge{}, 3: SagaEdge{}},
-				2: {},
-				3: {},
+				"1": {"2": SagaEdge{}, "3": SagaEdge{}},
+				"2": {},
+				"3": {},
 			}
 			tests := []struct {
 				name        string
@@ -327,9 +327,9 @@ func TestSaga(t *testing.T) {
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					vertices := map[VertexID]SagaVertex{
-						1: SagaVertex{VertexID: 1, Status: tt.status1},
-						2: SagaVertex{VertexID: 2, Status: tt.status2},
-						3: SagaVertex{VertexID: 2, Status: tt.status3},
+						"1": SagaVertex{VertexID: "1", Status: tt.status1},
+						"2": SagaVertex{VertexID: "2", Status: tt.status2},
+						"3": SagaVertex{VertexID: "2", Status: tt.status3},
 					}
 					saga := Saga{DAG: dag, Vertices: vertices}
 					_, aborted := CheckFinishedOrAbort(saga.Vertices)

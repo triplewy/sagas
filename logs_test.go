@@ -10,7 +10,7 @@ import (
 
 func TestLog(t *testing.T) {
 	config := DefaultConfig()
-	s := NewCoordinator(config)
+	s := NewCoordinator(config, NewBadgerDB(config.Path, config.InMemory))
 	defer s.Cleanup()
 
 	t.Run("append", func(t *testing.T) {
@@ -22,61 +22,61 @@ func TestLog(t *testing.T) {
 			{
 				name:    "init",
 				data:    []byte{0},
-				logType: Init,
+				logType: InitLog,
 			},
 			{
 				name:    "vertex",
-				data:    SagaVertex{VertexID: 0, Status: NotReached},
-				logType: Vertex,
+				data:    SagaVertex{VertexID: "0", Status: NotReached},
+				logType: VertexLog,
 			},
 			{
 				name: "graph",
 				data: Saga{
-					DAG:      map[VertexID]map[VertexID]SagaEdge{1: {}},
-					Vertices: map[VertexID]SagaVertex{1: SagaVertex{VertexID: 0, Status: NotReached}},
+					DAG:      map[VertexID]map[VertexID]SagaEdge{"1": {}},
+					Vertices: map[VertexID]SagaVertex{"1": SagaVertex{VertexID: "0", Status: NotReached}},
 				},
-				logType: Graph,
+				logType: GraphLog,
 			},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				sagaID := s.NewSagaID()
+				sagaID := s.logs.NewSagaID()
 				data, err := func() ([]byte, error) {
 					switch tt.logType {
-					case Graph:
+					case GraphLog:
 						saga, ok := tt.data.(Saga)
 						if !ok {
 							return nil, errors.New("data does not match expected LogType")
 						}
 						return encodeSaga(saga), nil
-					case Vertex:
+					case VertexLog:
 						vertex, ok := tt.data.(SagaVertex)
 						if !ok {
 							return nil, errors.New("data does not match expected LogType")
 						}
 						return encodeSagaVertex(vertex), nil
-					case Init:
+					case InitLog:
 						return tt.data.([]byte), nil
 					default:
 						return nil, errors.New("invalid LogType")
 					}
 				}()
 				assert.NilError(t, err)
-				s.AppendLog(sagaID, tt.logType, data)
-				index := s.LastIndex()
-				log, err := s.GetLog(index)
+				s.logs.AppendLog(sagaID, tt.logType, data)
+				index := s.logs.LastIndex()
+				log, err := s.logs.GetLog(index)
 				assert.NilError(t, err)
 				assert.Equal(t, sagaID, log.SagaID)
 				assert.Equal(t, tt.logType, log.LogType)
 				switch tt.logType {
-				case Graph:
+				case GraphLog:
 					saga := decodeSaga(log.Data)
 					assert.DeepEqual(t, tt.data.(Saga), saga)
-				case Vertex:
+				case VertexLog:
 					vertex := decodeSagaVertex(log.Data)
 					assert.DeepEqual(t, tt.data.(SagaVertex), vertex)
-				case Init:
+				case InitLog:
 					assert.DeepEqual(t, log.Data, []byte{0})
 				default:
 					t.Fatal("invalid LogType")
@@ -91,7 +91,7 @@ func TestLog(t *testing.T) {
 		for i := 0; i < 100; i++ {
 			wg.Add(1)
 			go func() {
-				ch <- s.NewSagaID()
+				ch <- s.logs.NewSagaID()
 				wg.Done()
 			}()
 		}
@@ -108,27 +108,27 @@ func TestLog(t *testing.T) {
 	})
 
 	t.Run("concurrent appends", func(t *testing.T) {
-		logType := Vertex
-		vertex := SagaVertex{VertexID: 0, Status: NotReached}
+		logType := VertexLog
+		vertex := SagaVertex{VertexID: "0", Status: NotReached}
 		data := encodeSagaVertex(vertex)
-		startIndex := s.LastIndex()
+		startIndex := s.logs.LastIndex()
 		var wg sync.WaitGroup
 
 		for i := 0; i < 100; i++ {
 			wg.Add(1)
 			go func() {
-				sagaID := s.NewSagaID()
-				s.AppendLog(sagaID, logType, data)
+				sagaID := s.logs.NewSagaID()
+				s.logs.AppendLog(sagaID, logType, data)
 				wg.Done()
 			}()
 		}
 		wg.Wait()
 
-		endIndex := s.LastIndex()
+		endIndex := s.logs.LastIndex()
 		assert.Equal(t, startIndex+100, endIndex)
 
 		for i := startIndex + 1; i <= endIndex; i++ {
-			log, err := s.GetLog(i)
+			log, err := s.logs.GetLog(i)
 			assert.NilError(t, err)
 			logVertex := decodeSagaVertex(log.Data)
 			assert.DeepEqual(t, vertex, logVertex)
