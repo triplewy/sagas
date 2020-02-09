@@ -1,10 +1,11 @@
 .PHONY: hotels
 
-greeter_server:
-	go build -o bin/greeter-server cmd/greeter/main.go
+client:
+	go build -o bin/client cmd/client/main.go
+	
+coordinator:
+	go build -o bin/coordinator cmd/coordinator/main.go
 	
 hotels:
 	go build -o bin/hotels cmd/hotels/main.go
 
-coordinator:
-	go build -o bin/coordinator cmd/coordinator/main.go

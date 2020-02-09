@@ -10,18 +10,24 @@ import (
 	"gotest.tools/assert"
 )
 
+// Need envoy to be running for this test to work
 func TestCoordinator(t *testing.T) {
 	config := DefaultConfig()
 
-	server, h := hotels.NewServer(config.HotelsAddr)
-	defer server.GracefulStop()
+	hServer, h := hotels.NewServer(config.HotelsAddr)
+	defer hServer.GracefulStop()
 
 	c := NewCoordinator(config, NewBadgerDB(config.Path, config.InMemory))
 	defer c.Cleanup()
 
+	cServer := NewServer(config.CoordinatorAddr, c)
+	defer cServer.GracefulStop()
+
+	client := NewClient(config.CoordinatorAddr)
+
 	t.Run("1 transaction", func(t *testing.T) {
 		t.Run("success", func(t *testing.T) {
-			err := BookRoom(c, "user0", "room0")
+			err := BookRoom(client, "user0", "room0")
 			assert.NilError(t, err)
 			value, ok := h.Rooms.Get("room0")
 			assert.Assert(t, ok)
@@ -29,7 +35,7 @@ func TestCoordinator(t *testing.T) {
 		})
 
 		t.Run("abort", func(t *testing.T) {
-			err := BookRoom(c, "user0", "room0")
+			err := BookRoom(client, "user0", "room0")
 			assert.Equal(t, err, ErrSagaAborted)
 		})
 
@@ -39,7 +45,7 @@ func TestCoordinator(t *testing.T) {
 				time.Sleep(3 * time.Second)
 				h.BlockNetwork.Store(false)
 			}()
-			err := BookRoom(c, "user1", "room1")
+			err := BookRoom(client, "user1", "room1")
 			assert.NilError(t, err)
 			value, ok := h.Rooms.Get("room1")
 			assert.Assert(t, ok)
@@ -49,7 +55,7 @@ func TestCoordinator(t *testing.T) {
 
 	t.Run("2 transactions", func(t *testing.T) {
 		t.Run("success", func(t *testing.T) {
-			err := BookMultipleRooms(c, "user2", []string{"room20", "room21"})
+			err := BookMultipleRooms(client, "user2", []string{"room20", "room21"})
 			assert.NilError(t, err)
 			value, ok := h.Rooms.Get("room20")
 			assert.Assert(t, ok)
@@ -60,21 +66,21 @@ func TestCoordinator(t *testing.T) {
 		})
 
 		t.Run("1 abort", func(t *testing.T) {
-			err := BookRoom(c, "user3", "room30")
+			err := BookRoom(client, "user3", "room30")
 			assert.NilError(t, err)
 			value, ok := h.Rooms.Get("room30")
 			assert.Assert(t, ok)
 			assert.Equal(t, "user3", value.(string))
-			err = BookMultipleRooms(c, "user3", []string{"room30", "room31"})
+			err = BookMultipleRooms(client, "user3", []string{"room30", "room31"})
 			assert.Equal(t, err, ErrSagaAborted)
 			_, ok = h.Rooms.Get("room31")
 			assert.Assert(t, !ok)
 		})
 
 		t.Run("2 abort", func(t *testing.T) {
-			err := BookRoom(c, "user4", "room40")
+			err := BookRoom(client, "user4", "room40")
 			assert.NilError(t, err)
-			err = BookRoom(c, "user4", "room41")
+			err = BookRoom(client, "user4", "room41")
 			assert.NilError(t, err)
 			value, ok := h.Rooms.Get("room40")
 			assert.Assert(t, ok)
@@ -82,7 +88,7 @@ func TestCoordinator(t *testing.T) {
 			value, ok = h.Rooms.Get("room41")
 			assert.Assert(t, ok)
 			assert.Equal(t, "user4", value.(string))
-			err = BookMultipleRooms(c, "user4", []string{"room40", "room41"})
+			err = BookMultipleRooms(client, "user4", []string{"room40", "room41"})
 			assert.Equal(t, err, ErrSagaAborted)
 		})
 	})
