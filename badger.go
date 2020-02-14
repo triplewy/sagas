@@ -22,7 +22,6 @@ func NewBadgerDB(path string, inMemory bool) *Badger {
 	if inMemory {
 		path = ""
 	}
-
 	opts := badger.DefaultOptions(path)
 	opts.InMemory = inMemory
 	opts.EventLogging = false

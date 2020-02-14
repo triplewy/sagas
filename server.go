@@ -3,6 +3,7 @@ package sagas
 import (
 	"context"
 	"errors"
+	"log"
 	"net"
 
 	"google.golang.org/grpc"
@@ -16,7 +17,7 @@ var (
 
 // NewServer starts a new gRPC server for sagas
 func NewServer(addr string, c *Coordinator) *grpc.Server {
-	s := grpc.NewServer()
+	s := grpc.NewServer(grpc.UnaryInterceptor(serverInterceptor))
 
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -28,6 +29,14 @@ func NewServer(addr string, c *Coordinator) *grpc.Server {
 	go s.Serve(lis)
 
 	return s
+}
+
+// Authorization unary interceptor function to handle authorize per RPC call
+func serverInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	log.Println(info.FullMethod)
+
+	// Calls the handler
+	return handler(ctx, req)
 }
 
 // StartSagaRPC starts a saga
@@ -43,14 +52,14 @@ func (c *Coordinator) StartSagaRPC(ctx context.Context, req *SagaReq) (*SagaResp
 			VertexID: VertexID(id),
 			TFunc: SagaFunc{
 				URL:       tf.GetUrl(),
-				Method:    tf.GetUrl(),
+				Method:    tf.GetMethod(),
 				RequestID: c.logs.NewRequestID(),
 				Body:      tf.GetBody(),
 				Resp:      make(map[string]string, 0),
 			},
 			CFunc: SagaFunc{
 				URL:       cf.GetUrl(),
-				Method:    cf.GetUrl(),
+				Method:    cf.GetMethod(),
 				RequestID: c.logs.NewRequestID(),
 				Body:      cf.GetBody(),
 				Resp:      make(map[string]string, 0),

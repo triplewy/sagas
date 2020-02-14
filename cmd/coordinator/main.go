@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"log"
 	"os"
 	"os/signal"
 
@@ -23,6 +24,8 @@ func main() {
 
 	s := sagas.NewServer(addr, c)
 	defer s.GracefulStop()
+
+	log.Printf("Server listening on %v\n", addr)
 
 	terminate := make(chan os.Signal, 1)
 	signal.Notify(terminate, os.Interrupt)
