@@ -28,4 +28,6 @@ message SagaReq {
   repeated Edge edges = 2;
 }
 
-message SagaResp {}
+message SagaResp {
+  map<string, Vertex> vertices = 1;
+}

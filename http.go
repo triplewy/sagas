@@ -10,7 +10,9 @@ import (
 
 // Errors for HTTP Requests
 var (
-	ErrInvalidHTTPMethod = errors.New("invalid HTTP method")
+	ErrInvalidLocalRequest = errors.New("invalid local request")
+	ErrAbortedLocalRequest = errors.New("aborted local request")
+	ErrInvalidHTTPMethod   = errors.New("invalid HTTP method")
 )
 
 // HTTPReq issues an HTTP request based on the provided input
@@ -18,6 +20,15 @@ func HTTPReq(url, method, requestID string, body map[string]string) (map[string]
 	client := http.Client{}
 
 	switch strings.ToUpper(method) {
+	case "LOCAL":
+		val, ok := body["success"]
+		if !ok {
+			return nil, ErrInvalidLocalRequest
+		}
+		if val == "0" {
+			return nil, ErrAbortedLocalRequest
+		}
+		return map[string]string{"success": "1"}, nil
 	case "GET":
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {

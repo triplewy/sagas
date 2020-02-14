@@ -91,6 +91,11 @@ type SagaFunc struct {
 	Resp      map[string]string
 }
 
+// GoString implements fmt GoString interface
+func (f SagaFunc) GoString() string {
+	return fmt.Sprintf("SagaFunc{\n\tURL: %v,\n\tMethod: %#v,\n\tRequestID: %v,\n\tBody: %#v, \n\tResp: %#v\n}", f.URL, f.Method, f.RequestID, f.Body, f.Resp)
+}
+
 // SwitchGraphDirection returns the opposite direction equivalent of inputted DAG
 func SwitchGraphDirection(dag map[VertexID]map[VertexID]struct{}) map[VertexID]map[VertexID]struct{} {
 	result := make(map[VertexID]map[VertexID]struct{}, len(dag))

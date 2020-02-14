@@ -6,9 +6,63 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/status"
+
 	"github.com/triplewy/sagas/hotels"
 	"gotest.tools/assert"
 )
+
+func TestCoordinatorLocal(t *testing.T) {
+	config := DefaultConfig()
+
+	c := NewCoordinator(config, NewBadgerDB(config.Path, config.InMemory))
+	defer c.Cleanup()
+
+	cServer := NewServer(config.CoordinatorAddr, c)
+	defer cServer.GracefulStop()
+
+	client := NewClient(config.CoordinatorAddr)
+
+	tests := []struct {
+		name string
+		dag  map[string]map[string]struct{}
+		err  error
+	}{
+		{
+			name: "1 success",
+			dag:  map[string]map[string]struct{}{"11": {}},
+			err:  nil,
+		},
+		{
+			name: "1 fail",
+			dag:  map[string]map[string]struct{}{"10": {}},
+			err:  ErrSagaAborted,
+		},
+		{
+			name: "2 parallel success",
+			dag:  map[string]map[string]struct{}{"11": {}, "21": {}},
+			err:  nil,
+		},
+		{
+			name: "2 parallel 1 success 1 fail",
+			dag:  map[string]map[string]struct{}{"10": {}, "21": {}},
+			err:  ErrSagaAborted,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := LocalSaga(client, tt.dag)
+			if err != nil {
+				st := status.Convert(err)
+				assert.Equal(t, st.Message(), tt.err.Error())
+			} else {
+				assert.Assert(t, err == tt.err, "Expected nil error")
+			}
+		})
+	}
+
+}
 
 // Need envoy to be running for this test to work
 func TestCoordinator(t *testing.T) {

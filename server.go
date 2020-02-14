@@ -48,7 +48,7 @@ func (c *Coordinator) StartSagaRPC(ctx context.Context, req *SagaReq) (*SagaResp
 	for id, v := range req.GetVertices() {
 		tf := v.GetT()
 		cf := v.GetC()
-		vertices[VertexID(id)] = SagaVertex{
+		vtx := SagaVertex{
 			VertexID: VertexID(id),
 			TFunc: SagaFunc{
 				URL:       tf.GetUrl(),
@@ -67,6 +67,13 @@ func (c *Coordinator) StartSagaRPC(ctx context.Context, req *SagaReq) (*SagaResp
 			TransferFields: v.GetTransferFields(),
 			Status:         NotReached,
 		}
+		if vtx.TFunc.Body == nil {
+			vtx.TFunc.Body = make(map[string]string, 0)
+		}
+		if vtx.CFunc.Body == nil {
+			vtx.CFunc.Body = make(map[string]string, 0)
+		}
+		vertices[VertexID(id)] = vtx
 		dag[VertexID(id)] = make(map[VertexID]SagaEdge, 0)
 	}
 
@@ -88,11 +95,75 @@ func (c *Coordinator) StartSagaRPC(ctx context.Context, req *SagaReq) (*SagaResp
 
 	finished, aborted := CheckFinishedOrAbort(replySaga.Vertices)
 
+	sagaResp := &SagaResp{
+		Vertices: verticesToProto(saga.Vertices),
+	}
+
 	if aborted {
-		return nil, ErrSagaAborted
+		return sagaResp, ErrSagaAborted
 	}
 	if !finished {
-		return nil, ErrSagaUnfinished
+		return sagaResp, ErrSagaUnfinished
 	}
-	return &SagaResp{}, nil
+	return sagaResp, nil
+}
+
+func verticesToProto(vertices map[VertexID]SagaVertex) map[string]*Vertex {
+	res := make(map[string]*Vertex, len(vertices))
+
+	for id, v := range vertices {
+		res[string(id)] = &Vertex{
+			Id: string(id),
+			T:  funcToProto(v.TFunc),
+			C:  funcToProto(v.CFunc),
+		}
+	}
+
+	return res
+}
+
+func protoToVertices(vertices map[string]*Vertex) map[VertexID]SagaVertex {
+	res := make(map[VertexID]SagaVertex, len(vertices))
+
+	for id, v := range vertices {
+		res[VertexID(id)] = SagaVertex{
+			VertexID: VertexID(id),
+			TFunc:    protoToFunc(v.T),
+			CFunc:    protoToFunc(v.C),
+		}
+	}
+
+	return res
+}
+
+func funcToProto(f SagaFunc) *Func {
+	body := make(map[string]string, len(f.Body)+len(f.Resp))
+
+	for k, v := range f.Body {
+		body[k] = v
+	}
+
+	for k, v := range f.Resp {
+		body[k] = v
+	}
+
+	return &Func{
+		Url:    f.URL,
+		Method: f.Method,
+		Body:   body,
+	}
+}
+
+func protoToFunc(f *Func) SagaFunc {
+	body := make(map[string]string, len(f.Body))
+
+	for k, v := range f.Body {
+		body[k] = v
+	}
+
+	return SagaFunc{
+		URL:    f.Url,
+		Method: f.Method,
+		Body:   body,
+	}
 }
