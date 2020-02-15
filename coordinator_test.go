@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"google.golang.org/grpc/status"
-
 	"github.com/triplewy/sagas/hotels"
 	"gotest.tools/assert"
 )
@@ -24,40 +22,41 @@ func TestCoordinatorLocal(t *testing.T) {
 	client := NewClient(config.CoordinatorAddr)
 
 	tests := []struct {
-		name string
-		dag  map[string]map[string]struct{}
-		err  error
+		name     string
+		dag      map[string]map[string]struct{}
+		replyDag map[string]Status
 	}{
 		{
-			name: "1 success",
-			dag:  map[string]map[string]struct{}{"11": {}},
-			err:  nil,
+			name:     "1 success",
+			dag:      map[string]map[string]struct{}{"11": {}},
+			replyDag: map[string]Status{"11": Status_END_T},
 		},
 		{
-			name: "1 fail",
-			dag:  map[string]map[string]struct{}{"10": {}},
-			err:  ErrSagaAborted,
+			name:     "1 fail",
+			dag:      map[string]map[string]struct{}{"10": {}},
+			replyDag: map[string]Status{"11": Status_ABORT},
 		},
 		{
-			name: "2 parallel success",
-			dag:  map[string]map[string]struct{}{"11": {}, "21": {}},
-			err:  nil,
+			name:     "2 parallel success",
+			dag:      map[string]map[string]struct{}{"11": {}, "21": {}},
+			replyDag: map[string]Status{"11": Status_END_T, "21": Status_END_T},
 		},
 		{
-			name: "2 parallel 1 success 1 fail",
-			dag:  map[string]map[string]struct{}{"10": {}, "21": {}},
-			err:  ErrSagaAborted,
+			name:     "2 parallel 1 success 1 fail",
+			dag:      map[string]map[string]struct{}{"10": {}, "21": {}},
+			replyDag: map[string]Status{"10": Status_ABORT, "21": Status_END_C},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := LocalSaga(client, tt.dag)
-			if err != nil {
-				st := status.Convert(err)
-				assert.Equal(t, st.Message(), tt.err.Error())
-			} else {
-				assert.Assert(t, err == tt.err, "Expected nil error")
+			saga, err := LocalSaga(client, tt.dag)
+			assert.NilError(t, err)
+			for tuple := range saga.Vertices.IterBuffered() {
+				k := tuple.Key
+				vtx := tuple.Val.(Vertex)
+				status, _ := tt.replyDag[k]
+				assert.Equal(t, vtx.Status, status)
 			}
 		})
 	}

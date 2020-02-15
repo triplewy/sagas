@@ -3,110 +3,89 @@ package sagas
 import (
 	"errors"
 	"fmt"
+	"sync"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/triplewy/sagas/utils"
+
+	cmap "github.com/orcaman/concurrent-map"
 )
 
 // Errors involving incorrect sagas
 var (
-	ErrVertexIDNotFound = errors.New("vertexID does not exist in saga")
+	ErrIDNotFound       = errors.New("vertexID does not exist in saga")
 	ErrInvalidSaga      = errors.New("saga is invalid because it breaks an invariant")
 	ErrUnequivalentDAGs = errors.New("DAGs in saga are not logically equivalent")
 )
 
-// VertexID is a unique id representing each vertex in each saga
-type VertexID string
+// Saga is different from proto in that it uses nested map for DAG
+// rather than an array of edges
+type Saga struct {
+	ID string
 
-// Status is a possible condition of a transaction in a saga
-type Status int
+	// map[string]Vertex
+	Vertices cmap.ConcurrentMap
 
-// Types of transaction statuses
-const (
-	NotReached Status = iota + 1
-	StartT
-	EndT // End of forward transaction
-	StartC
-	EndC // End of compensating transaction
-	Abort
-)
-
-// GoString implements fmt GoString interface
-func (s Status) GoString() string {
-	switch s {
-	case NotReached:
-		return "NotReached"
-	case StartT:
-		return "StartT"
-	case EndT:
-		return "EndT"
-	case StartC:
-		return "StartC"
-	case EndC:
-		return "EndC"
-	case Abort:
-		return "Abort"
-	default:
-		return "Unknown"
-	}
+	// DAG only requires RWMutex since most of time we will
+	// only be reading from it
+	DAG    map[string]map[string][]string
+	dagMtx *sync.RWMutex
 }
 
-// Saga is a DAG of SagaVertices that keeps track of progress of a Saga transaction
-type Saga struct {
-	DAG      map[VertexID]map[VertexID]SagaEdge
-	Vertices map[VertexID]SagaVertex
+// NewSaga creates a new saga and initializes concurrent data structures
+// NOTE: THIS DOES NOT INSTANTIATE **ID** FIELD
+func NewSaga(vertices map[string]Vertex, dag map[string]map[string][]string) Saga {
+	vtcs := cmap.New()
+	for k, vtx := range vertices {
+		vtcs.Set(k, vtx)
+	}
+
+	return Saga{
+		Vertices: vtcs,
+		DAG:      dag,
+		dagMtx:   new(sync.RWMutex),
+	}
 }
 
 // GoString implements fmt GoString interface
 func (s Saga) GoString() string {
-	return fmt.Sprintf("Saga{DAG: %v, Vertices: %#v}", s.DAG, s.Vertices)
+	return fmt.Sprintf("Saga{\n\tID: %v\n\tVertices: %#v,\n\tDAG: %#v\n}", s.ID, s.Vertices, s.DAG)
 }
 
-// SagaVertex represents each vertex in a saga graph. Each vertex has a forward and compensating SagaFunc.
-// Each SagaVertex should be able to rollback a forward transaction with its own data. This means that
-// rollbacks in a Saga do not have to be sequential
-type SagaVertex struct {
-	VertexID       VertexID
-	TFunc          SagaFunc
-	CFunc          SagaFunc
-	TransferFields []string // fields to transfer from TFunc's resp to CFunc's body
-	Status         Status
+// Equal is custom equality operator between two sagas
+func (s Saga) Equal(t Saga) bool {
+	if s.ID != t.ID {
+		return false
+	}
+	if !cmp.Equal(s.DAG, t.DAG) {
+		return false
+	}
+	if !cmp.Equal(s.Vertices.Items(), t.Vertices.Items()) {
+		return false
+	}
+	return true
 }
 
-// GoString implements fmt GoString interface
-func (v SagaVertex) GoString() string {
-	return fmt.Sprintf("SagaVertex{\n\tVertexID: %v,\n\tTFunc: %#v,\n\tCFunc: %#v,\n\tStatus: %v\n}", v.VertexID, v.TFunc, v.CFunc, v.Status.GoString())
+func (s Saga) getVtx(id string) (Vertex, bool) {
+	value, exists := s.Vertices.Get(id)
+	if !exists {
+		return Vertex{}, exists
+	}
+	return value.(Vertex), exists
 }
 
-// SagaEdge connects two SagaVertex's and transfers data between them
-type SagaEdge struct {
-	Fields []string
-}
-
-// SagaFunc provides information to call a function in the Saga
-type SagaFunc struct {
-	URL       string
-	Method    string
-	RequestID string
-	Body      map[string]string
-	Resp      map[string]string
-}
-
-// GoString implements fmt GoString interface
-func (f SagaFunc) GoString() string {
-	return fmt.Sprintf("SagaFunc{\n\tURL: %v,\n\tMethod: %#v,\n\tRequestID: %v,\n\tBody: %#v, \n\tResp: %#v\n}", f.URL, f.Method, f.RequestID, f.Body, f.Resp)
-}
-
-// SwitchGraphDirection returns the opposite direction equivalent of inputted DAG
-func SwitchGraphDirection(dag map[VertexID]map[VertexID]struct{}) map[VertexID]map[VertexID]struct{} {
-	result := make(map[VertexID]map[VertexID]struct{}, len(dag))
+// SwitchDAGDirection returns the opposite direction equivalent of inputted DAG
+func SwitchDAGDirection(dag map[string]map[string]struct{}) map[string]map[string]struct{} {
+	result := make(map[string]map[string]struct{}, len(dag))
 
 	for parentID, children := range dag {
 		if _, ok := result[parentID]; !ok {
-			result[parentID] = make(map[VertexID]struct{})
+			result[parentID] = make(map[string]struct{})
 		}
 		for childID := range children {
 			if _, ok := result[childID]; !ok {
-				result[childID] = make(map[VertexID]struct{})
+				result[childID] = make(map[string]struct{})
 			}
 			result[childID][parentID] = struct{}{}
 		}
@@ -116,7 +95,7 @@ func SwitchGraphDirection(dag map[VertexID]map[VertexID]struct{}) map[VertexID]m
 }
 
 // CheckEquivalentDAGs checks if DAG and BottomUpDAG are logically equivalent
-func CheckEquivalentDAGs(a, b map[VertexID]map[VertexID]struct{}) error {
+func CheckEquivalentDAGs(a, b map[string]map[string]struct{}) error {
 	// Check if both graphs have same amount of vertices
 	if len(a) != len(b) {
 		return ErrUnequivalentDAGs
@@ -128,7 +107,7 @@ func CheckEquivalentDAGs(a, b map[VertexID]map[VertexID]struct{}) error {
 		for childID := range children {
 			childParents, ok := b[childID]
 			if !ok {
-				return ErrVertexIDNotFound
+				return ErrIDNotFound
 			}
 			if _, ok := childParents[parentID]; !ok {
 				return ErrUnequivalentDAGs
@@ -142,7 +121,7 @@ func CheckEquivalentDAGs(a, b map[VertexID]map[VertexID]struct{}) error {
 		for parentID := range parents {
 			parentChildren, ok := a[parentID]
 			if !ok {
-				return ErrVertexIDNotFound
+				return ErrIDNotFound
 			}
 			if _, ok := parentChildren[childID]; !ok {
 				return ErrUnequivalentDAGs
@@ -153,26 +132,27 @@ func CheckEquivalentDAGs(a, b map[VertexID]map[VertexID]struct{}) error {
 	return nil
 }
 
-// CheckFinishedOrAbort checks if saga has finished or has been aborted.
-// If no abort in the saga, then all vertices must have status EndT to be finished.
+// CheckFinished checks if saga has finished. If no abort in the saga,
+// then all vertices must have status Status_END_T to be finished.
 // If abort in the saga, then all vertices except aborted and not-reached vertexes
-// must have status EndC to be finished.
-func CheckFinishedOrAbort(vertices map[VertexID]SagaVertex) (finished, aborted bool) {
-	finished = true
+// must have status Status_END_C to be finished.
+func CheckFinished(vertices map[string]Vertex) bool {
+	aborted := false
+	finished := true
 	finishedC := true
 	// For each vertex in the saga...
 	for _, v := range vertices {
-		// If vertex has status Abort, then whole saga should be aborted
-		// Edge case: If we have abort in saga and other vertices have EndT, saga is not finished!
-		if v.Status == Abort {
+		// If vertex has status Status_ABORT, then whole saga should be aborted
+		// Edge case: If we have abort in saga and other vertices have Status_END_T, saga is not finished!
+		if v.Status == Status_ABORT {
 			aborted = true
 		}
-		// If vertex is not EndT, then impossible for saga to be finished forward
-		if v.Status != EndT {
+		// If vertex is not Status_END_T, then impossible for saga to be finished forward
+		if v.Status != Status_END_T {
 			finished = false
 		}
-		// If status is not abort, notReached, nor EndC, then impossible for saga to be finished compensating
-		if !(v.Status == Abort || v.Status == EndC || v.Status == NotReached) {
+		// If status is not abort, notReached, nor  Status_END_C, then impossible for saga to be finished compensating
+		if !(v.Status == Status_ABORT || v.Status == Status_END_C || v.Status == Status_NOT_REACHED) {
 			finishedC = false
 		}
 	}
@@ -180,32 +160,48 @@ func CheckFinishedOrAbort(vertices map[VertexID]SagaVertex) (finished, aborted b
 	if aborted {
 		finished = finishedC
 	}
-	return
+	return finished
 }
 
 // CheckValidSaga returns error if any of saga is in invalid state
-func CheckValidSaga(saga Saga, aborted bool) error {
+func CheckValidSaga(saga Saga) error {
+	saga.dagMtx.RLock()
+	defer saga.dagMtx.RUnlock()
+
+	// Get aborted from vertices rather than from saga for now
+	aborted := func(saga Saga) bool {
+		for tuple := range saga.Vertices.IterBuffered() {
+			vtx := tuple.Val.(Vertex)
+			if vtx.Status == Status_ABORT {
+				return true
+			}
+		}
+		return false
+	}(saga)
+
 	// If not aborted, saga is valid iff:
-	// 1. Each vertex is either NotReached, StartT, EndT
-	// 2. Parent is not EndT, then child should be NotReached
+	// 1. Each vertex is either Status_NOT_REACHED, Status_START_T, Status_END_T
+	// 2. Parent is not Status_END_T, then child should be Status_NOT_REACHED
 	if !aborted {
 		// For each vertex in the saga...
-		for parentID, parent := range saga.Vertices {
+		for tuple := range saga.Vertices.IterBuffered() {
+			parentID := tuple.Key
+			parent := tuple.Val.(Vertex)
 			// #1
-			if !(parent.Status == NotReached || parent.Status == StartT || parent.Status == EndT) {
+			if !(parent.Status == Status_NOT_REACHED || parent.Status == Status_START_T || parent.Status == Status_END_T) {
 				return ErrInvalidSaga
 			}
 			children, ok := saga.DAG[parentID]
 			if !ok {
-				return ErrVertexIDNotFound
+				return ErrIDNotFound
 			}
 			for childID := range children {
-				child, ok := saga.Vertices[childID]
+				child, ok := saga.getVtx(childID)
 				if !ok {
-					return ErrVertexIDNotFound
+					return ErrIDNotFound
 				}
 				// #2
-				if parent.Status != EndT && child.Status != NotReached {
+				if parent.Status != Status_END_T && child.Status != Status_NOT_REACHED {
 					return ErrInvalidSaga
 				}
 			}
@@ -213,18 +209,21 @@ func CheckValidSaga(saga Saga, aborted bool) error {
 		return nil
 	}
 
-	// If aborted, saga is valid iff: Parent is NotReached, StartT, or Abort, then child should be NotReached
-	for parentID, parent := range saga.Vertices {
+	// If aborted, saga is valid iff: Parent is Status_NOT_REACHED, Status_START_T, or Status_ABORT, then child should be Status_NOT_REACHED
+	for tuple := range saga.Vertices.IterBuffered() {
+		parentID := tuple.Key
+		parent := tuple.Val.(Vertex)
+
 		children, ok := saga.DAG[parentID]
 		if !ok {
-			return ErrVertexIDNotFound
+			return ErrIDNotFound
 		}
 		for childID := range children {
-			child, ok := saga.Vertices[childID]
+			child, ok := saga.getVtx(childID)
 			if !ok {
-				return ErrVertexIDNotFound
+				return ErrIDNotFound
 			}
-			if (parent.Status == NotReached || parent.Status == StartT || parent.Status == Abort) && child.Status != NotReached {
+			if (parent.Status == Status_NOT_REACHED || parent.Status == Status_START_T || parent.Status == Status_ABORT) && child.Status != Status_NOT_REACHED {
 				return ErrInvalidSaga
 			}
 		}
@@ -232,8 +231,44 @@ func CheckValidSaga(saga Saga, aborted bool) error {
 	return nil
 }
 
+// FindSourceVertices finds set of all vertex ids who have no parents
+func FindSourceVertices(dag map[string]map[string][]string) (ids []string) {
+	// Build set of vertices that are children
+	childNodes := make(map[string]struct{}, 0)
+	for _, children := range dag {
+		for id := range children {
+			childNodes[id] = struct{}{}
+		}
+	}
+
+	// For all vertices, the ones not in childNodes are source nodes
+	for id := range dag {
+		if _, ok := childNodes[id]; !ok {
+			ids = append(ids, id)
+		}
+	}
+
+	return
+}
+
+type sagaPack struct {
+	ID       string
+	Vertices map[string]Vertex
+	DAG      map[string]map[string][]string
+}
+
 func encodeSaga(saga Saga) []byte {
-	buf, err := utils.EncodeMsgPack(saga)
+	sp := sagaPack{
+		ID:       saga.ID,
+		Vertices: make(map[string]Vertex, saga.Vertices.Count()),
+		DAG:      saga.DAG,
+	}
+
+	saga.Vertices.IterCb(func(k string, v interface{}) {
+		sp.Vertices[k] = v.(Vertex)
+	})
+
+	buf, err := utils.EncodeMsgPack(sp)
 	if err != nil {
 		panic(err)
 	}
@@ -241,15 +276,28 @@ func encodeSaga(saga Saga) []byte {
 }
 
 func decodeSaga(data []byte) Saga {
-	var saga Saga
-	err := utils.DecodeMsgPack(data, &saga)
+	var sp sagaPack
+
+	err := utils.DecodeMsgPack(data, &sp)
 	if err != nil {
 		panic(err)
 	}
-	return saga
+
+	vtxs := cmap.New()
+
+	for key, value := range sp.Vertices {
+		vtxs.Set(key, value)
+	}
+
+	return Saga{
+		ID:       sp.ID,
+		Vertices: vtxs,
+		DAG:      sp.DAG,
+		dagMtx:   new(sync.RWMutex),
+	}
 }
 
-func encodeSagaVertex(vertex SagaVertex) []byte {
+func encodeVertex(vertex Vertex) []byte {
 	buf, err := utils.EncodeMsgPack(vertex)
 	if err != nil {
 		panic(err)
@@ -257,8 +305,8 @@ func encodeSagaVertex(vertex SagaVertex) []byte {
 	return buf.Bytes()
 }
 
-func decodeSagaVertex(data []byte) SagaVertex {
-	var vertex SagaVertex
+func decodeVertex(data []byte) Vertex {
+	var vertex Vertex
 	err := utils.DecodeMsgPack(data, &vertex)
 	if err != nil {
 		panic(err)

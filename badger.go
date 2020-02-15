@@ -52,19 +52,18 @@ func NewBadgerDB(path string, inMemory bool) *Badger {
 		logCounter:  logCounter,
 	}
 
-	b.AppendLog(0, InitLog, []byte{0})
+	b.AppendLog("0", InitLog, []byte{0})
 
 	return b
 }
 
 // NewSagaID retrieves a unique saga ID by incrementing
-func (b *Badger) NewSagaID() (sagaID uint64) {
-	var err error
-	sagaID, err = b.sagaCounter.Next()
+func (b *Badger) NewSagaID() (sagaID string) {
+	num, err := b.sagaCounter.Next()
 	if err != nil {
 		panic(err)
 	}
-	return
+	return strconv.FormatUint(num, 10)
 }
 
 // NewRequestID retrieves a unique request ID by incrementing
@@ -108,7 +107,7 @@ func (b *Badger) LastIndex() (index uint64) {
 }
 
 // AppendLog takes a sagaID, LogType, and a slice of bytes and formats them into a log to persist to disk
-func (b *Badger) AppendLog(sagaID uint64, logType LogType, data []byte) {
+func (b *Badger) AppendLog(sagaID string, logType LogType, data []byte) {
 	err := b.db.Update(func(txn *badger.Txn) error {
 		index, err := b.logCounter.Next()
 		if err != nil {

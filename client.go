@@ -21,11 +21,11 @@ func NewClient(addr string) CoordinatorClient {
 // that fail in the saga. To determine 'true' or 'false' nodes, the vertexes of the dag
 // should be named '<id>1' to signify true or '<id>0' to signify false.
 // When coordinator receives LocalSaga req, it performs all vertex requests locally
-func LocalSaga(c CoordinatorClient, dag map[string]map[string]struct{}) error {
-	vertices := make(map[string]*Vertex, len(dag))
+func LocalSaga(c CoordinatorClient, graph map[string]map[string]struct{}) (Saga, error) {
+	vertices := make(map[string]*Vertex, len(graph))
 	var edges []*Edge
 
-	for id, set := range dag {
+	for id, set := range graph {
 		status := id[len(id)-1:]
 		vertices[id] = &Vertex{
 			Id: id,
@@ -48,7 +48,7 @@ func LocalSaga(c CoordinatorClient, dag map[string]map[string]struct{}) error {
 		}
 	}
 
-	msg := &SagaReq{
+	msg := &SagaMsg{
 		Vertices: vertices,
 		Edges:    edges,
 	}
@@ -56,10 +56,13 @@ func LocalSaga(c CoordinatorClient, dag map[string]map[string]struct{}) error {
 	ctx := context.Background()
 
 	resp, err := c.StartSagaRPC(ctx, msg)
+	if err != nil {
+		return Saga{}, err
+	}
 
-	fmt.Printf("%#v\n", protoToVertices(resp.GetVertices()))
+	// finished, aborted := CheckFinishedOrStatus_ABORT(replySaga.Vertices)
 
-	return err
+	return protoToSaga(resp), nil
 }
 
 // BookRoom starts a new saga that makes a single transaction to book a hotel room
@@ -86,11 +89,9 @@ func BookRoom(c CoordinatorClient, userID, roomID string) error {
 		},
 	}
 
-	edges := []*Edge{}
-
-	msg := &SagaReq{
+	msg := &SagaMsg{
 		Vertices: vertices,
-		Edges:    edges,
+		Edges:    nil,
 	}
 
 	ctx := context.Background()
@@ -127,11 +128,9 @@ func BookMultipleRooms(c CoordinatorClient, userID string, roomIDs []string) err
 		}
 	}
 
-	edges := []*Edge{}
-
-	msg := &SagaReq{
+	msg := &SagaMsg{
 		Vertices: vertices,
-		Edges:    edges,
+		Edges:    nil,
 	}
 
 	ctx := context.Background()

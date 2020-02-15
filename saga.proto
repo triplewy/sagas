@@ -2,32 +2,43 @@ syntax = "proto3";
 
 package sagas;
 
-service Coordinator { rpc StartSagaRPC(SagaReq) returns (SagaResp); }
+service Coordinator { rpc StartSagaRPC(SagaMsg) returns (SagaMsg); }
+
+enum Status {
+  NOT_REACHED = 0;
+  START_T = 1;
+  END_T = 2;
+  START_C = 3;
+  END_C = 4;
+  ABORT = 5;
+}
 
 message Vertex {
   string id = 1;
   Func t = 2;
   Func c = 3;
+  // Transfer fields from Func t resp to Func c body
   repeated string transfer_fields = 4;
+  Status status = 5;
 }
 
 message Func {
   string url = 1;
   string method = 2;
-  map<string, string> body = 3;
+  string request_id = 3;
+  map<string, string> body = 4;
+  map<string, string> resp = 5;
 }
 
 message Edge {
   string start_id = 1;
   string end_id = 2;
+  // Transfer fields from start node resp to end node body
   repeated string transfer_fields = 3;
 }
 
-message SagaReq {
-  map<string, Vertex> vertices = 1;
-  repeated Edge edges = 2;
-}
-
-message SagaResp {
-  map<string, Vertex> vertices = 1;
+message SagaMsg {
+  string id = 1;
+  map<string, Vertex> vertices = 2;
+  repeated Edge edges = 3;
 }

@@ -2,7 +2,6 @@ package sagas
 
 import (
 	"errors"
-	"strconv"
 	"sync"
 	"testing"
 
@@ -17,7 +16,6 @@ func TestLogStore(t *testing.T) {
 	config := DefaultConfig()
 
 	badger := LogStore(NewBadgerDB(config.Path, true))
-	bolt := LogStore(NewBoltDB(config.Path))
 
 	tests := []struct {
 		name  string
@@ -26,10 +24,6 @@ func TestLogStore(t *testing.T) {
 		{
 			name:  "badger",
 			store: badger,
-		},
-		{
-			name:  "bolt",
-			store: bolt,
 		},
 	}
 
@@ -50,7 +44,7 @@ func TestLogStore(t *testing.T) {
 					go func() {
 						defer wg.Done()
 						id := store.NewSagaID()
-						ok := m.SetIfAbsent(strconv.FormatUint(id, 10), struct{}{})
+						ok := m.SetIfAbsent(id, struct{}{})
 						if !ok {
 							dup.Store(true)
 						}
@@ -96,15 +90,12 @@ func TestLogStore(t *testing.T) {
 					},
 					{
 						name:    "vertex",
-						data:    SagaVertex{VertexID: "0", Status: NotReached},
+						data:    Vertex{Id: "0", Status: Status_NOT_REACHED},
 						logType: VertexLog,
 					},
 					{
-						name: "graph",
-						data: Saga{
-							DAG:      map[VertexID]map[VertexID]SagaEdge{"1": {}},
-							Vertices: map[VertexID]SagaVertex{"1": SagaVertex{VertexID: "0", Status: NotReached}},
-						},
+						name:    "graph",
+						data:    NewSaga(map[string]Vertex{"1": Vertex{Id: "0", Status: Status_NOT_REACHED}}, map[string]map[string][]string{"1": {}}),
 						logType: GraphLog,
 					},
 				}
@@ -121,11 +112,11 @@ func TestLogStore(t *testing.T) {
 								}
 								return encodeSaga(saga), nil
 							case VertexLog:
-								vertex, ok := tt.data.(SagaVertex)
+								vertex, ok := tt.data.(Vertex)
 								if !ok {
 									return nil, errors.New("data does not match expected LogType")
 								}
-								return encodeSagaVertex(vertex), nil
+								return encodeVertex(vertex), nil
 							case InitLog:
 								return tt.data.([]byte), nil
 							default:
@@ -147,8 +138,8 @@ func TestLogStore(t *testing.T) {
 							saga := decodeSaga(log.Data)
 							assert.DeepEqual(t, tt.data.(Saga), saga)
 						case VertexLog:
-							vertex := decodeSagaVertex(log.Data)
-							assert.DeepEqual(t, tt.data.(SagaVertex), vertex)
+							vertex := decodeVertex(log.Data)
+							assert.DeepEqual(t, tt.data.(Vertex), vertex)
 						case InitLog:
 							assert.DeepEqual(t, log.Data, []byte{0})
 						default:
@@ -160,8 +151,8 @@ func TestLogStore(t *testing.T) {
 
 			t.Run("concurrent", func(t *testing.T) {
 				logType := VertexLog
-				vertex := SagaVertex{VertexID: "0", Status: NotReached}
-				data := encodeSagaVertex(vertex)
+				vertex := Vertex{Id: "0", Status: Status_NOT_REACHED}
+				data := encodeVertex(vertex)
 				startIndex := store.LastIndex()
 
 				var wg sync.WaitGroup
@@ -182,7 +173,7 @@ func TestLogStore(t *testing.T) {
 				for i := startIndex + 1; i <= endIndex; i++ {
 					log, err := store.GetLog(i)
 					assert.NilError(t, err)
-					logVertex := decodeSagaVertex(log.Data)
+					logVertex := decodeVertex(log.Data)
 					assert.DeepEqual(t, vertex, logVertex)
 				}
 			})

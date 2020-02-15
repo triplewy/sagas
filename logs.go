@@ -37,7 +37,7 @@ func (t LogType) GoString() string {
 // Log is stored on persistent disk to keep track of sagas
 type Log struct {
 	Lsn     uint64
-	SagaID  uint64
+	SagaID  string
 	LogType LogType
 	Data    []byte
 }
@@ -52,8 +52,8 @@ func (log Log) GoString() string {
 			saga := decodeSaga(log.Data)
 			return saga.GoString()
 		case VertexLog:
-			vertex := decodeSagaVertex(log.Data)
-			return vertex.GoString()
+			vertex := decodeVertex(log.Data)
+			return vertex.String()
 		default:
 			return "unknown data"
 		}

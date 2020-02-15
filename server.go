@@ -40,130 +40,83 @@ func serverInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySer
 }
 
 // StartSagaRPC starts a saga
-func (c *Coordinator) StartSagaRPC(ctx context.Context, req *SagaReq) (*SagaResp, error) {
-	vertices := make(map[VertexID]SagaVertex, len(req.GetVertices()))
-	dag := make(map[VertexID]map[VertexID]SagaEdge, 0)
+func (c *Coordinator) StartSagaRPC(ctx context.Context, req *SagaMsg) (*SagaMsg, error) {
+	saga := protoToSaga(req)
+	// Don't forget to set sagaID
+	sagaID := c.logs.NewSagaID()
+	saga.ID = sagaID
+
+	replyCh := make(chan Saga, 1)
+	c.createCh <- createMsg{
+		saga:    saga,
+		replyCh: replyCh,
+	}
+
+	replySaga := <-replyCh
+
+	sagaResp := sagaToProto(replySaga)
+
+	return sagaResp, nil
+}
+
+func protoToSaga(req *SagaMsg) Saga {
+	vertices := make(map[string]Vertex, len(req.GetVertices()))
+	dag := make(map[string]map[string][]string, 0)
 
 	// Populate vertices
-	for id, v := range req.GetVertices() {
-		tf := v.GetT()
-		cf := v.GetC()
-		vtx := SagaVertex{
-			VertexID: VertexID(id),
-			TFunc: SagaFunc{
-				URL:       tf.GetUrl(),
-				Method:    tf.GetMethod(),
-				RequestID: c.logs.NewRequestID(),
-				Body:      tf.GetBody(),
-				Resp:      make(map[string]string, 0),
-			},
-			CFunc: SagaFunc{
-				URL:       cf.GetUrl(),
-				Method:    cf.GetMethod(),
-				RequestID: c.logs.NewRequestID(),
-				Body:      cf.GetBody(),
-				Resp:      make(map[string]string, 0),
-			},
-			TransferFields: v.GetTransferFields(),
-			Status:         NotReached,
+	for id, vtx := range req.GetVertices() {
+		if vtx == nil {
+			continue
 		}
-		if vtx.TFunc.Body == nil {
-			vtx.TFunc.Body = make(map[string]string, 0)
+		if vtx.T.Body == nil {
+			vtx.T.Body = make(map[string]string, 0)
 		}
-		if vtx.CFunc.Body == nil {
-			vtx.CFunc.Body = make(map[string]string, 0)
+		if vtx.T.Resp == nil {
+			vtx.T.Resp = make(map[string]string, 0)
 		}
-		vertices[VertexID(id)] = vtx
-		dag[VertexID(id)] = make(map[VertexID]SagaEdge, 0)
+		if vtx.C.Body == nil {
+			vtx.C.Body = make(map[string]string, 0)
+		}
+		if vtx.C.Resp == nil {
+			vtx.C.Resp = make(map[string]string, 0)
+		}
+		vertices[id] = *vtx
+		dag[id] = make(map[string][]string, 0)
 	}
 
 	// Populate dag
 	for _, edge := range req.GetEdges() {
-		dag[VertexID(edge.GetStartId())][VertexID(edge.GetEndId())] = SagaEdge{Fields: edge.GetTransferFields()}
+		dag[edge.GetStartId()][edge.GetEndId()] = edge.GetTransferFields()
 	}
 
-	saga := Saga{DAG: dag, Vertices: vertices}
-	sagaID := c.logs.NewSagaID()
-
-	replyCh := make(chan Saga, 1)
-	c.createCh <- createMsg{
-		sagaID:  sagaID,
-		saga:    saga,
-		replyCh: replyCh,
-	}
-	replySaga := <-replyCh
-
-	finished, aborted := CheckFinishedOrAbort(replySaga.Vertices)
-
-	sagaResp := &SagaResp{
-		Vertices: verticesToProto(saga.Vertices),
-	}
-
-	if aborted {
-		return sagaResp, ErrSagaAborted
-	}
-	if !finished {
-		return sagaResp, ErrSagaUnfinished
-	}
-	return sagaResp, nil
+	return NewSaga(vertices, dag)
 }
 
-func verticesToProto(vertices map[VertexID]SagaVertex) map[string]*Vertex {
-	res := make(map[string]*Vertex, len(vertices))
+func sagaToProto(saga Saga) *SagaMsg {
+	// Populate vertices
+	vertices := make(map[string]*Vertex, len(saga.Vertices))
+	saga.Vertices.IterCb(func(k string, v interface{}) {
+		vtx := v.(Vertex)
+		vertices[k] = &vtx
+	})
 
-	for id, v := range vertices {
-		res[string(id)] = &Vertex{
-			Id: string(id),
-			T:  funcToProto(v.TFunc),
-			C:  funcToProto(v.CFunc),
+	// Populate edges
+	saga.dagMtx.RLock()
+	defer saga.dagMtx.RUnlock()
+
+	var edges []*Edge
+	for k, children := range saga.DAG {
+		for c, fields := range children {
+			edges = append(edges, &Edge{
+				StartId:        k,
+				EndId:          c,
+				TransferFields: fields,
+			})
 		}
 	}
-
-	return res
-}
-
-func protoToVertices(vertices map[string]*Vertex) map[VertexID]SagaVertex {
-	res := make(map[VertexID]SagaVertex, len(vertices))
-
-	for id, v := range vertices {
-		res[VertexID(id)] = SagaVertex{
-			VertexID: VertexID(id),
-			TFunc:    protoToFunc(v.T),
-			CFunc:    protoToFunc(v.C),
-		}
-	}
-
-	return res
-}
-
-func funcToProto(f SagaFunc) *Func {
-	body := make(map[string]string, len(f.Body)+len(f.Resp))
-
-	for k, v := range f.Body {
-		body[k] = v
-	}
-
-	for k, v := range f.Resp {
-		body[k] = v
-	}
-
-	return &Func{
-		Url:    f.URL,
-		Method: f.Method,
-		Body:   body,
-	}
-}
-
-func protoToFunc(f *Func) SagaFunc {
-	body := make(map[string]string, len(f.Body))
-
-	for k, v := range f.Body {
-		body[k] = v
-	}
-
-	return SagaFunc{
-		URL:    f.Url,
-		Method: f.Method,
-		Body:   body,
+	return &SagaMsg{
+		Id:       saga.ID,
+		Vertices: vertices,
+		Edges:    edges,
 	}
 }

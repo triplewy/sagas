@@ -6,7 +6,7 @@ import (
 
 // Errors from incorrect coordinator logic
 var (
-	ErrInvalidStatus         = errors.New("SagaVertex's status is invalid in the context of the saga")
+	ErrInvalidStatus         = errors.New("Vertex's status is invalid in the context of the saga")
 	ErrInvalidFuncID         = errors.New("invalid saga func ID")
 	ErrInvalidFuncInputField = errors.New("field does not exist in input for saga func")
 	ErrInvalidFuncInputType  = errors.New("incorrect type for input field in saga func")
@@ -15,12 +15,11 @@ var (
 )
 
 type updateMsg struct {
-	sagaID uint64
-	vertex SagaVertex
+	sagaID string
+	vertex Vertex
 }
 
 type createMsg struct {
-	sagaID  uint64
 	saga    Saga
 	replyCh chan Saga
 }
@@ -29,8 +28,8 @@ type createMsg struct {
 type Coordinator struct {
 	Config   *Config
 	logs     LogStore
-	sagas    map[uint64]Saga
-	requests map[uint64]chan Saga
+	sagas    map[string]Saga
+	requests map[string]chan Saga
 
 	createCh chan createMsg
 	updateCh chan updateMsg
@@ -41,8 +40,8 @@ func NewCoordinator(config *Config, logStore LogStore) *Coordinator {
 	c := &Coordinator{
 		Config:   config,
 		logs:     logStore,
-		sagas:    make(map[uint64]Saga),
-		requests: make(map[uint64]chan Saga),
+		sagas:    make(map[string]Saga),
+		requests: make(map[string]chan Saga),
 
 		createCh: make(chan createMsg),
 		updateCh: make(chan updateMsg),
@@ -51,177 +50,141 @@ func NewCoordinator(config *Config, logStore LogStore) *Coordinator {
 	go c.Run()
 
 	if config.AutoRecover {
-		c.Recover()
+		sagas := Recover(c.logs)
+		c.sagas = sagas
 	}
 
 	return c
 }
 
-// Recover reads logs from disks and reconstructs dags in memory
-func (c *Coordinator) Recover() {
-	// Repopulate all sagas into memory
-	for i := uint64(1); i <= c.logs.LastIndex(); i++ {
-		log, err := c.logs.GetLog(i)
-		if err != nil {
-			// Error must be ErrLogIndexNotFound so we just skip the index
-			continue
-		}
-		switch log.LogType {
-		case InitLog:
-			continue
-		case GraphLog:
-			if _, ok := c.sagas[log.SagaID]; ok {
-				panic("multiple graphs with same sagaID")
-			}
-			saga := decodeSaga(log.Data)
-			c.sagas[log.SagaID] = saga
-		case VertexLog:
-			saga, ok := c.sagas[log.SagaID]
-			if !ok {
-				panic("log of vertex has sagaID that does not exist")
-			}
-			vertex := decodeSagaVertex(log.Data)
-			if _, ok := saga.Vertices[vertex.VertexID]; !ok {
-				panic(ErrVertexIDNotFound)
-			}
-			saga.Vertices[vertex.VertexID] = vertex
-		default:
-			panic("unrecognized log type")
-		}
-	}
-	// Run all sagas
-	for sagaID, saga := range c.sagas {
-		c.RunSaga(sagaID, saga)
-	}
-}
+// // RunSaga first checks if saga is already finished. Each unfinished saga vertex then runs in its own goroutine
+// func (c *Coordinator) RunSaga(saga Saga) {
+// 	// Check if saga already finished
+// 	finished := CheckFinished(saga.Vertices)
 
-// RunSaga first checks if saga is already finished. Each unfinished saga vertex then runs in its own goroutine
-func (c *Coordinator) RunSaga(sagaID uint64, saga Saga) {
-	// Check if saga already finished
-	finished, aborted := CheckFinishedOrAbort(saga.Vertices)
-	if finished {
-		// Notify request that saga has finished
-		if replyCh, ok := c.requests[sagaID]; ok {
-			replyCh <- saga
-			delete(c.requests, sagaID)
-		}
-		return
-	}
+// 	if finished {
+// 		// Notify request that saga has finished
+// 		if replyCh, ok := c.requests[saga.ID]; ok {
+// 			replyCh <- saga
+// 			delete(c.requests, saga.ID)
+// 		}
+// 		return
+// 	}
 
-	err := CheckValidSaga(saga, aborted)
-	if err != nil {
-		panic(err)
-	}
+// 	err := CheckValidSaga(saga, aborted)
+// 	if err != nil {
+// 		panic(err)
+// 	}
 
-	if aborted {
-		c.RollbackSaga(sagaID, saga)
-	} else {
-		c.ContinueSaga(sagaID, saga)
-	}
-}
+// 	if aborted {
+// 		c.RollbackSaga(saga)
+// 	} else {
+// 		c.ContinueSaga(saga)
+// 	}
+// }
 
-// RollbackSaga calls necessary compensating functions to undo saga
-func (c *Coordinator) RollbackSaga(sagaID uint64, saga Saga) {
-	// Each vertex that is not Abort, NotReached, or EndC still needs to fully rollback
-	for _, vertex := range saga.Vertices {
-		if !(vertex.Status == Abort || vertex.Status == EndC || vertex.Status == NotReached) {
-			go c.ProcessC(sagaID, vertex)
-		}
-	}
-}
+// // RollbackSaga calls necessary compensating functions to undo saga
+// func (c *Coordinator) RollbackSaga(saga Saga) {
+// 	// Each vertex that is not Status_ABORT, Status_NOT_REACHED, or  Status_END_C still needs to fully rollback
+// 	for _, vertex := range saga.Vertices {
+// 		if !(vertex.Status == Status_ABORT || vertex.Status == Status_END_C || vertex.Status == Status_NOT_REACHED) {
+// 			go c.ProcessC(saga.ID, vertex)
+// 		}
+// 	}
+// }
 
-// ContinueSaga runs saga forward
-func (c *Coordinator) ContinueSaga(sagaID uint64, saga Saga) {
-	// Build set of vertices that are children
-	seen := make(map[VertexID]struct{}, 0)
-	for _, children := range saga.DAG {
-		for id := range children {
-			seen[id] = struct{}{}
-		}
-	}
+// // ContinueSaga runs saga forward
+// func (c *Coordinator) ContinueSaga(saga Saga) {
+// 	// Build set of vertices that are children
+// 	seen := make(map[string]struct{}, 0)
+// 	for _, children := range saga.DAG {
+// 		for id := range children {
+// 			seen[id] = struct{}{}
+// 		}
+// 	}
 
-	var highest []VertexID
-	// For all vertices, the ones not in seen are highest vertices
-	for id := range saga.Vertices {
-		isChild := func() bool {
-			for seenID := range seen {
-				if seenID == id {
-					return true
-				}
-			}
-			return false
-		}()
-		if !isChild {
-			highest = append(highest, id)
-		}
-	}
+// 	var highest []string
+// 	// For all vertices, the ones not in seen are highest vertices
+// 	for id := range saga.Vertices {
+// 		isChild := func() bool {
+// 			for seenID := range seen {
+// 				if seenID == id {
+// 					return true
+// 				}
+// 			}
+// 			return false
+// 		}()
+// 		if !isChild {
+// 			highest = append(highest, id)
+// 		}
+// 	}
 
-	// Find list of vertices to process using bfs
-	process := make(map[VertexID]SagaVertex)
-	var id VertexID
+// 	// Find list of vertices to process using bfs
+// 	process := make(map[string]Vertex)
+// 	var id string
 
-	for len(highest) > 0 {
-		// pop first vertex off of highest
-		id, highest = highest[0], highest[1:]
+// 	for len(highest) > 0 {
+// 		// pop first vertex off of highest
+// 		id, highest = highest[0], highest[1:]
 
-		v, ok := saga.Vertices[id]
-		if !ok {
-			panic(ErrVertexIDNotFound)
-		}
-		// if vertex is not EndT, add to process
-		if v.Status != EndT {
-			process[id] = v
-		} else {
-			// add all children to highest
-			for childID := range saga.DAG[id] {
-				highest = append(highest, childID)
-			}
-		}
-	}
+// 		v, ok := saga.Vertices[id]
+// 		if !ok {
+// 			panic(ErrIDNotFound)
+// 		}
+// 		// if vertex is not Status_END_T, add to process
+// 		if v.Status != Status_END_T {
+// 			process[id] = v
+// 		} else {
+// 			// add all children to highest
+// 			for childID := range saga.DAG[id] {
+// 				highest = append(highest, childID)
+// 			}
+// 		}
+// 	}
 
-	// Run each vertex to process on a separate goroutine
-	for _, vertex := range process {
-		go c.ProcessT(sagaID, vertex)
-	}
-}
+// 	// Run each vertex to process on a separate goroutine
+// 	for _, vertex := range process {
+// 		go c.ProcessT(saga.ID, vertex)
+// 	}
+// }
 
-// ProcessT runs a SagaVertex's TFunc
-func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
+// ProcessT runs a Vertex's  T
+func (c *Coordinator) ProcessT(sagaID string, vertex Vertex) {
 	// Sanity check on vertex's status
-	if vertex.Status == EndT {
+	if vertex.Status == Status_END_T {
 		return
 	}
-	if !(vertex.Status == StartT || vertex.Status == NotReached) {
+	if !(vertex.Status == Status_START_T || vertex.Status == Status_NOT_REACHED) {
 		panic(ErrInvalidSaga)
 	}
 
 	// Append to log
-	data := encodeSagaVertex(vertex)
+	data := encodeVertex(vertex)
 	c.logs.AppendLog(sagaID, VertexLog, data)
 
 	// Evaluate vertex's function
-	f := vertex.TFunc
+	f := vertex.T
 
-	resp, err := HTTPReq(f.URL, f.Method, f.RequestID, f.Body)
-	status := EndT
+	resp, err := HTTPReq(f.GetUrl(), f.GetMethod(), f.GetRequestId(), f.GetBody())
+	status := Status_END_T
 	if err != nil {
 		Error.Println(err)
 		// Store error to output
 		f.Resp["error"] = err.Error()
 		// Set status to abort
-		status = Abort
+		status = Status_ABORT
 	} else {
 		for k, v := range resp {
 			f.Resp[k] = v
 		}
 		for _, k := range vertex.TransferFields {
-			vertex.CFunc.Body[k] = f.Resp[k]
+			vertex.C.Body[k] = f.Resp[k]
 		}
 	}
 	vertex.Status = status
 
 	// Append to log
-	c.logs.AppendLog(sagaID, VertexLog, encodeSagaVertex(vertex))
+	c.logs.AppendLog(sagaID, VertexLog, encodeVertex(vertex))
 
 	// Send newVertex to update chan for coordinator to update its map of sagas
 	c.updateCh <- updateMsg{
@@ -230,36 +193,36 @@ func (c *Coordinator) ProcessT(sagaID uint64, vertex SagaVertex) {
 	}
 }
 
-// ProcessC runs a SagaVertex's CFunc
-func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
+// ProcessC runs a Vertex's  C
+func (c *Coordinator) ProcessC(sagaID string, vertex Vertex) {
 	// Sanity check on vertex's status
-	if vertex.Status == EndC {
+	if vertex.Status == Status_END_C {
 		return
 	}
-	if !(vertex.Status == StartT || vertex.Status == EndT || vertex.Status == StartC) {
+	if !(vertex.Status == Status_START_T || vertex.Status == Status_END_T || vertex.Status == Status_START_C) {
 		panic(ErrInvalidSaga)
 	}
-	// If vertex status is StartT, execute EndT first
-	if vertex.Status == StartT {
+	// If vertex status is  Status_START_T, execute Status_END_T first
+	if vertex.Status == Status_START_T {
 		c.ProcessT(sagaID, vertex)
 		return
 	}
 
-	// Now vertex must either be EndT or StartC. Append to log
-	data := encodeSagaVertex(vertex)
+	// Now vertex must either be Status_END_T or Status_START_C. Append to log
+	data := encodeVertex(vertex)
 	c.logs.AppendLog(sagaID, VertexLog, data)
 
 	// Evaluate vertex's function
-	f := vertex.CFunc
+	f := vertex.C
 
-	resp, err := HTTPReq(f.URL, f.Method, f.RequestID, f.Body)
-	status := EndC
+	resp, err := HTTPReq(f.GetUrl(), f.GetMethod(), f.GetRequestId(), f.GetBody())
+	status := Status_END_C
 	if err != nil {
 		Error.Println(err)
 		// Store error to output
 		f.Resp["error"] = err.Error()
 		// set status to startC because did not succeed
-		status = StartC
+		status = Status_START_C
 	} else {
 		for k, v := range resp {
 			f.Resp[k] = v
@@ -268,7 +231,7 @@ func (c *Coordinator) ProcessC(sagaID uint64, vertex SagaVertex) {
 	vertex.Status = status
 
 	// Append to log
-	c.logs.AppendLog(sagaID, VertexLog, encodeSagaVertex(vertex))
+	c.logs.AppendLog(sagaID, VertexLog, encodeVertex(vertex))
 
 	// Send newVertex to update chan for coordinator to update its map of sagas
 	c.updateCh <- updateMsg{
@@ -284,36 +247,55 @@ func (c *Coordinator) Run() {
 		case msg := <-c.updateCh:
 			sagaID := msg.sagaID
 			vertex := msg.vertex
+
+			// Check if sagas exists
 			saga, ok := c.sagas[sagaID]
 			if !ok {
 				panic(ErrSagaIDNotFound)
 			}
-			saga.Vertices[vertex.VertexID] = vertex
-			for childID, edge := range saga.DAG[vertex.VertexID] {
-				child, ok := saga.Vertices[childID]
+
+			// Update saga
+			saga.Vertices.Set(vertex.Id, vertex)
+
+			// Transfer fields to children and run them concurrently
+			saga.dagMtx.RLock()
+			defer saga.dagMtx.Unlock()
+
+			for childID, fields := range saga.DAG[vertex.Id] {
+				child, ok := saga.getVtx(childID)
 				if !ok {
-					panic(ErrVertexIDNotFound)
+					panic(ErrIDNotFound)
 				}
-				for _, field := range edge.Fields {
-					child.TFunc.Body[field] = vertex.TFunc.Resp[field]
+
+				if len(fields) > 0 {
+					for _, field := range fields {
+						child.T.Body[field] = vertex.T.Resp[field]
+					}
+					saga.Vertices.Set(childID, child)
 				}
+
+				// TODO: Run child vertex
 			}
-			c.RunSaga(sagaID, saga)
+
 		case msg := <-c.createCh:
-			sagaID := msg.sagaID
 			saga := msg.saga
-			if _, ok := c.sagas[sagaID]; ok {
+
+			// Check if this saga already exists in local map and requests
+			if _, ok := c.sagas[saga.ID]; ok {
 				panic(ErrSagaIDAlreadyExists)
 			}
-			if _, ok := c.requests[sagaID]; ok {
+			if _, ok := c.requests[saga.ID]; ok {
 				panic(ErrSagaIDAlreadyExists)
 			}
+
 			// Append new saga to log
-			c.logs.AppendLog(sagaID, GraphLog, encodeSaga(saga))
+			c.logs.AppendLog(saga.ID, GraphLog, encodeSaga(saga))
+
 			// Insert new saga and request and run new saga
-			c.sagas[sagaID] = saga
-			c.requests[sagaID] = msg.replyCh
-			c.RunSaga(msg.sagaID, saga)
+			c.sagas[saga.ID] = saga
+			c.requests[saga.ID] = msg.replyCh
+
+			// TODO: Run source vertices in parallel
 		}
 	}
 }
