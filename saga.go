@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/google/go-cmp/cmp"
-
 	"github.com/triplewy/sagas/utils"
 
+	"github.com/google/go-cmp/cmp"
 	cmap "github.com/orcaman/concurrent-map"
+	"go.uber.org/atomic"
 )
 
 // Errors involving incorrect sagas
@@ -31,6 +31,9 @@ type Saga struct {
 	// only be reading from it
 	DAG    map[string]map[string][]string
 	dagMtx *sync.RWMutex
+
+	// atomic boolean that signifies if saga has already been marked as aborted
+	aborted *atomic.Bool
 }
 
 // NewSaga creates a new saga and initializes concurrent data structures
@@ -45,6 +48,7 @@ func NewSaga(vertices map[string]Vertex, dag map[string]map[string][]string) Sag
 		Vertices: vtcs,
 		DAG:      dag,
 		dagMtx:   new(sync.RWMutex),
+		aborted:  atomic.NewBool(false),
 	}
 }
 
@@ -62,6 +66,9 @@ func (s Saga) Equal(t Saga) bool {
 		return false
 	}
 	if !cmp.Equal(s.Vertices.Items(), t.Vertices.Items()) {
+		return false
+	}
+	if s.aborted.Load() != t.aborted.Load() {
 		return false
 	}
 	return true
@@ -132,16 +139,18 @@ func CheckEquivalentDAGs(a, b map[string]map[string]struct{}) error {
 	return nil
 }
 
-// CheckFinished checks if saga has finished. If no abort in the saga,
+// CheckFinishedOrAbort checks if saga has finished. If no abort in the saga,
 // then all vertices must have status Status_END_T to be finished.
 // If abort in the saga, then all vertices except aborted and not-reached vertexes
 // must have status Status_END_C to be finished.
-func CheckFinished(vertices map[string]Vertex) bool {
-	aborted := false
-	finished := true
+func CheckFinishedOrAbort(saga Saga) (finished, aborted bool) {
+	aborted = false
+	finished = true
 	finishedC := true
-	// For each vertex in the saga...
-	for _, v := range vertices {
+
+	saga.Vertices.IterCb(func(key string, value interface{}) {
+		v := value.(Vertex)
+
 		// If vertex has status Status_ABORT, then whole saga should be aborted
 		// Edge case: If we have abort in saga and other vertices have Status_END_T, saga is not finished!
 		if v.Status == Status_ABORT {
@@ -155,12 +164,14 @@ func CheckFinished(vertices map[string]Vertex) bool {
 		if !(v.Status == Status_ABORT || v.Status == Status_END_C || v.Status == Status_NOT_REACHED) {
 			finishedC = false
 		}
-	}
+	})
+
 	// If saga aborted, we set finished status to if saga finished compensating
 	if aborted {
 		finished = finishedC
 	}
-	return finished
+
+	return
 }
 
 // CheckValidSaga returns error if any of saga is in invalid state
@@ -231,7 +242,8 @@ func CheckValidSaga(saga Saga) error {
 	return nil
 }
 
-// FindSourceVertices finds set of all vertex ids who have no parents
+// FindSourceVertices finds set of all vertex ids who have no parents.
+// dagMtx MUST BE RLOCKED before calling function
 func FindSourceVertices(dag map[string]map[string][]string) (ids []string) {
 	// Build set of vertices that are children
 	childNodes := make(map[string]struct{}, 0)
@@ -255,6 +267,7 @@ type sagaPack struct {
 	ID       string
 	Vertices map[string]Vertex
 	DAG      map[string]map[string][]string
+	aborted  bool
 }
 
 func encodeSaga(saga Saga) []byte {
@@ -262,6 +275,7 @@ func encodeSaga(saga Saga) []byte {
 		ID:       saga.ID,
 		Vertices: make(map[string]Vertex, saga.Vertices.Count()),
 		DAG:      saga.DAG,
+		aborted:  saga.aborted.Load(),
 	}
 
 	saga.Vertices.IterCb(func(k string, v interface{}) {
@@ -294,6 +308,7 @@ func decodeSaga(data []byte) Saga {
 		Vertices: vtxs,
 		DAG:      sp.DAG,
 		dagMtx:   new(sync.RWMutex),
+		aborted:  atomic.NewBool(sp.aborted),
 	}
 }
 

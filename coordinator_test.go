@@ -34,7 +34,7 @@ func TestCoordinatorLocal(t *testing.T) {
 		{
 			name:     "1 fail",
 			dag:      map[string]map[string]struct{}{"10": {}},
-			replyDag: map[string]Status{"11": Status_ABORT},
+			replyDag: map[string]Status{"10": Status_ABORT},
 		},
 		{
 			name:     "2 parallel success",
@@ -45,6 +45,46 @@ func TestCoordinatorLocal(t *testing.T) {
 			name:     "2 parallel 1 success 1 fail",
 			dag:      map[string]map[string]struct{}{"10": {}, "21": {}},
 			replyDag: map[string]Status{"10": Status_ABORT, "21": Status_END_C},
+		},
+		{
+			name:     "2 parallel 2 abort",
+			dag:      map[string]map[string]struct{}{"10": {}, "20": {}},
+			replyDag: map[string]Status{"10": Status_ABORT, "20": Status_ABORT},
+		},
+		{
+			name:     "2 sequential success",
+			dag:      map[string]map[string]struct{}{"11": {"21": struct{}{}}, "21": {}},
+			replyDag: map[string]Status{"11": Status_END_T, "21": Status_END_T},
+		},
+		{
+			name:     "2 sequential 1st abort",
+			dag:      map[string]map[string]struct{}{"10": {"21": struct{}{}}, "21": {}},
+			replyDag: map[string]Status{"10": Status_ABORT, "21": Status_NOT_REACHED},
+		},
+		{
+			name:     "2 sequential 2nd abort",
+			dag:      map[string]map[string]struct{}{"11": {"20": struct{}{}}, "20": {}},
+			replyDag: map[string]Status{"11": Status_END_C, "20": Status_ABORT},
+		},
+		{
+			name:     "3 (1 root, 2 children) success",
+			dag:      map[string]map[string]struct{}{"11": {"21": struct{}{}, "31": struct{}{}}, "21": {}, "31": {}},
+			replyDag: map[string]Status{"11": Status_END_T, "21": Status_END_T, "31": Status_END_T},
+		},
+		{
+			name:     "3 (1 root, 2 children) root abort",
+			dag:      map[string]map[string]struct{}{"10": {"21": struct{}{}, "31": struct{}{}}, "21": {}, "31": {}},
+			replyDag: map[string]Status{"10": Status_ABORT, "21": Status_NOT_REACHED, "31": Status_NOT_REACHED},
+		},
+		{
+			name:     "3 (1 root, 2 children) child abort",
+			dag:      map[string]map[string]struct{}{"11": {"20": struct{}{}, "31": struct{}{}}, "20": {}, "31": {}},
+			replyDag: map[string]Status{"11": Status_END_C, "20": Status_ABORT, "31": Status_END_C},
+		},
+		{
+			name:     "3 (1 root, 2 children) 2 child abort",
+			dag:      map[string]map[string]struct{}{"11": {"20": struct{}{}, "30": struct{}{}}, "20": {}, "30": {}},
+			replyDag: map[string]Status{"11": Status_END_C, "20": Status_ABORT, "30": Status_ABORT},
 		},
 	}
 
@@ -88,7 +128,7 @@ func TestCoordinator(t *testing.T) {
 		})
 
 		t.Run("abort", func(t *testing.T) {
-			err := BookRoom(client, "user0", "room0")
+			err := BookRoom(client, "user1", "room0")
 			assert.Equal(t, err, ErrSagaAborted)
 		})
 

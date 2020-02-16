@@ -134,18 +134,20 @@ func TestSaga(t *testing.T) {
 				name           string
 				status         Status
 				expectFinished bool
+				expectAborted  bool
 			}{
-				{"NOT_REACHED", Status_NOT_REACHED, false},
-				{"START_T", Status_START_T, false},
-				{"END_T", Status_END_T, true},
-				{"ABORT", Status_ABORT, true},
+				{"NOT_REACHED", Status_NOT_REACHED, false, false},
+				{"START_T", Status_START_T, false, false},
+				{"END_T", Status_END_T, true, false},
+				{"ABORT", Status_ABORT, true, true},
 			}
 
 			for _, tt := range tests {
 				t.Run(tt.name, func(t *testing.T) {
 					vertices := map[string]Vertex{"1": Vertex{Id: "1", Status: tt.status}}
-					finished := CheckFinished(vertices)
-					assert.Assert(t, finished == tt.expectFinished)
+					saga := NewSaga(vertices, nil)
+					finished, aborted := CheckFinishedOrAbort(saga)
+					assert.Assert(t, finished == tt.expectFinished && aborted == tt.expectAborted)
 				})
 			}
 		})
@@ -156,22 +158,23 @@ func TestSaga(t *testing.T) {
 				status1        Status
 				status2        Status
 				expectFinished bool
+				expectAborted  bool
 			}{
-				{"ABORT NOT_REACHED", Status_ABORT, Status_NOT_REACHED, true},
-				{"ABORT START_T", Status_ABORT, Status_START_T, false},
-				{"ABORT END_T", Status_ABORT, Status_END_T, false},
-				{"ABORT START_C", Status_ABORT, Status_START_C, false},
-				{"ABORT END_C", Status_ABORT, Status_END_C, true},
-				{"ABORT ABORT", Status_ABORT, Status_ABORT, true},
+				{"ABORT NOT_REACHED", Status_ABORT, Status_NOT_REACHED, true, true},
+				{"ABORT START_T", Status_ABORT, Status_START_T, false, true},
+				{"ABORT END_T", Status_ABORT, Status_END_T, false, true},
+				{"ABORT START_C", Status_ABORT, Status_START_C, false, true},
+				{"ABORT END_C", Status_ABORT, Status_END_C, true, true},
+				{"ABORT ABORT", Status_ABORT, Status_ABORT, true, true},
 
-				{"NOT_REACHED NOT_REACHED", Status_NOT_REACHED, Status_NOT_REACHED, false},
-				{"NOT_REACHED START_T", Status_NOT_REACHED, Status_START_T, false},
-				{"NOT_REACHED END_T", Status_NOT_REACHED, Status_END_T, false},
+				{"NOT_REACHED NOT_REACHED", Status_NOT_REACHED, Status_NOT_REACHED, false, false},
+				{"NOT_REACHED START_T", Status_NOT_REACHED, Status_START_T, false, false},
+				{"NOT_REACHED END_T", Status_NOT_REACHED, Status_END_T, false, false},
 
-				{"START_T START_T", Status_START_T, Status_START_T, false},
-				{"START_T END_T", Status_START_T, Status_END_T, false},
+				{"START_T START_T", Status_START_T, Status_START_T, false, false},
+				{"START_T END_T", Status_START_T, Status_END_T, false, false},
 
-				{"END_T END_T", Status_END_T, Status_END_T, true},
+				{"END_T END_T", Status_END_T, Status_END_T, true, false},
 			}
 
 			for _, tt := range tests {
@@ -180,8 +183,9 @@ func TestSaga(t *testing.T) {
 						"1": Vertex{Id: "1", Status: tt.status1},
 						"2": Vertex{Id: "2", Status: tt.status2},
 					}
-					finished := CheckFinished(vertices)
-					assert.Assert(t, finished == tt.expectFinished)
+					saga := NewSaga(vertices, nil)
+					finished, aborted := CheckFinishedOrAbort(saga)
+					assert.Assert(t, finished == tt.expectFinished && aborted == tt.expectAborted)
 				})
 			}
 		})

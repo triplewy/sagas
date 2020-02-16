@@ -21,11 +21,11 @@ func NewClient(addr string) CoordinatorClient {
 // that fail in the saga. To determine 'true' or 'false' nodes, the vertexes of the dag
 // should be named '<id>1' to signify true or '<id>0' to signify false.
 // When coordinator receives LocalSaga req, it performs all vertex requests locally
-func LocalSaga(c CoordinatorClient, graph map[string]map[string]struct{}) (Saga, error) {
-	vertices := make(map[string]*Vertex, len(graph))
+func LocalSaga(c CoordinatorClient, dag map[string]map[string]struct{}) (Saga, error) {
+	vertices := make(map[string]*Vertex, len(dag))
 	var edges []*Edge
 
-	for id, set := range graph {
+	for id, set := range dag {
 		status := id[len(id)-1:]
 		vertices[id] = &Vertex{
 			Id: id,
