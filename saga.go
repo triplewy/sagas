@@ -22,13 +22,14 @@ var (
 // Saga is different from proto in that it uses nested map for DAG
 // rather than an array of edges
 type Saga struct {
+	// Unique ID for each Saga
 	ID string
 
 	// map[string]Vertex
 	Vertices cmap.ConcurrentMap
 
-	// DAG only requires RWMutex since most of time we will
-	// only be reading from it
+	// DAG only requires RWMutex rather than Concurrent Map
+	// since most of time we will only be reading from it
 	DAG    map[string]map[string][]string
 	dagMtx *sync.RWMutex
 
@@ -54,7 +55,7 @@ func NewSaga(vertices map[string]Vertex, dag map[string]map[string][]string) Sag
 
 // GoString implements fmt GoString interface
 func (s Saga) GoString() string {
-	return fmt.Sprintf("Saga{\n\tID: %v\n\tVertices: %#v,\n\tDAG: %#v\n}", s.ID, s.Vertices, s.DAG)
+	return fmt.Sprintf("Saga{\n\tID: %v\n\tVertices: %#v,\n\tDAG: %#v\n}", s.ID, s.Vertices.Items(), s.DAG)
 }
 
 // Equal is custom equality operator between two sagas
@@ -242,9 +243,86 @@ func CheckValidSaga(saga Saga) error {
 	return nil
 }
 
-// FindSourceVertices finds set of all vertex ids who have no parents.
+// SagaBFS finds set of all vertex ids to start processing using BFS
+func SagaBFS(saga Saga) []Vertex {
+	saga.dagMtx.RLock()
+	defer saga.dagMtx.RUnlock()
+
+	// Get aborted from vertices rather than from saga for now
+	aborted := func(saga Saga) bool {
+		for tuple := range saga.Vertices.IterBuffered() {
+			vtx := tuple.Val.(Vertex)
+			if vtx.Status == Status_ABORT {
+				return true
+			}
+		}
+		return false
+	}(saga)
+
+	// Get source nodes of graph
+	sources := findSourceVertices(saga.DAG)
+
+	process := make(map[string]Vertex, 0)
+	var vtxID string
+
+	// If not aborted, find top most nodes with NOT_REACHED or START_T
+	if !aborted {
+		// Use bfs to find the nodes with NOT_REACHED or START_T to add to process
+		for len(sources) > 0 {
+			vtxID, sources = sources[0], sources[1:]
+			vtx, ok := saga.getVtx(vtxID)
+			if !ok {
+				panic(ErrIDNotFound)
+			}
+			// If node has NOT_REACHED or START_T, add to process, and stop traveling down current path
+			if vtx.Status == Status_NOT_REACHED || vtx.Status == Status_START_T {
+				process[vtxID] = vtx
+				continue
+			}
+			// Node must have END_T status, add children to queue
+			if vtx.Status == Status_END_T {
+				for child := range saga.DAG[vtxID] {
+					sources = append(sources, child)
+				}
+			}
+		}
+	} else {
+		// If aborted, find top most nodes with END_T or START_C to add to process
+		for len(sources) > 0 {
+			vtxID, sources = sources[0], sources[1:]
+			vtx, ok := saga.getVtx(vtxID)
+			if !ok {
+				panic(ErrIDNotFound)
+			}
+			// If NOT_REACHED or ABORTED, just continue
+			if vtx.Status == Status_NOT_REACHED || vtx.Status == Status_ABORT {
+				continue
+			}
+			// If END_T or START_C, add to process and stop travelling down current path
+			if vtx.Status == Status_END_T || vtx.Status == Status_START_C {
+				process[vtxID] = vtx
+				continue
+			}
+			// Node must have END_C status, add children to queue
+			if vtx.Status == Status_END_C {
+				for child := range saga.DAG[vtxID] {
+					sources = append(sources, child)
+				}
+			}
+		}
+	}
+
+	var res []Vertex
+	for _, vtx := range process {
+		res = append(res, vtx)
+	}
+
+	return res
+}
+
+// findSourceVertices finds set of all vertex ids who have no parents.
 // dagMtx MUST BE RLOCKED before calling function
-func FindSourceVertices(dag map[string]map[string][]string) (ids []string) {
+func findSourceVertices(dag map[string]map[string][]string) (ids []string) {
 	// Build set of vertices that are children
 	childNodes := make(map[string]struct{}, 0)
 	for _, children := range dag {

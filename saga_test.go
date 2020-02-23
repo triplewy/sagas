@@ -85,7 +85,7 @@ func TestSaga(t *testing.T) {
 		}
 	})
 
-	t.Run("FindSourceVertices", func(t *testing.T) {
+	t.Run("findSourceVertices", func(t *testing.T) {
 		tests := []struct {
 			name string
 			dag  map[string]map[string][]string
@@ -120,7 +120,7 @@ func TestSaga(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				ids := FindSourceVertices(tt.dag)
+				ids := findSourceVertices(tt.dag)
 				sort.Strings(ids)
 				sort.Strings(tt.ids)
 				assert.DeepEqual(t, ids, tt.ids)

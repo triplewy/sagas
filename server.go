@@ -3,7 +3,6 @@ package sagas
 import (
 	"context"
 	"errors"
-	"log"
 	"net"
 
 	"google.golang.org/grpc"
@@ -33,8 +32,6 @@ func NewServer(addr string, c *Coordinator) *grpc.Server {
 
 // Authorization unary interceptor function to handle authorize per RPC call
 func serverInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-	log.Println(info.FullMethod)
-
 	// Calls the handler
 	return handler(ctx, req)
 }

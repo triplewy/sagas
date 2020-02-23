@@ -20,7 +20,7 @@ func (c *Coordinator) ProcessT(sagaID string, vertex Vertex) {
 	resp, err := HTTPReq(f.GetUrl(), f.GetMethod(), f.GetRequestId(), f.GetBody())
 	status := Status_END_T
 	if err != nil {
-		Error.Println(err)
+		// Error.Println(err)
 		// Store error to output
 		f.Resp["error"] = err.Error()
 		// Set status to abort
@@ -37,14 +37,6 @@ func (c *Coordinator) ProcessT(sagaID string, vertex Vertex) {
 
 	// Append to log
 	c.logs.AppendLog(sagaID, VertexLog, encodeVertex(vertex))
-
-	// Update coordinator saga map
-	saga, ok := c.getSaga(sagaID)
-	if !ok {
-		panic(ErrSagaIDNotFound)
-	}
-	saga.Vertices.Set(vertex.Id, vertex)
-	c.sagas.Set(sagaID, saga)
 
 	// Send newVertex to update chan for coordinator to update its map of sagas
 	c.updateCh <- updateMsg{
@@ -91,14 +83,6 @@ func (c *Coordinator) ProcessC(sagaID string, vertex Vertex) {
 
 	// Append to log
 	c.logs.AppendLog(sagaID, VertexLog, encodeVertex(vertex))
-
-	// Update coordinator saga map
-	saga, ok := c.getSaga(sagaID)
-	if !ok {
-		panic(ErrSagaIDNotFound)
-	}
-	saga.Vertices.Set(vertex.Id, vertex)
-	c.sagas.Set(sagaID, saga)
 
 	// Send newVertex to update chan for coordinator to continue saga
 	c.updateCh <- updateMsg{
