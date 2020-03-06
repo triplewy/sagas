@@ -275,7 +275,7 @@ func SagaBFS(saga Saga) []Vertex {
 				panic(ErrIDNotFound)
 			}
 			// If node has NOT_REACHED or START_T, add to process, and stop traveling down current path
-			if vtx.Status == Status_NOT_REACHED || vtx.Status == Status_START_T {
+			if vtx.Status == Status_NOT_REACHED {
 				process[vtxID] = vtx
 				continue
 			}
@@ -298,8 +298,8 @@ func SagaBFS(saga Saga) []Vertex {
 			if vtx.Status == Status_NOT_REACHED || vtx.Status == Status_ABORT {
 				continue
 			}
-			// If END_T or START_C, add to process and stop travelling down current path
-			if vtx.Status == Status_END_T || vtx.Status == Status_START_C {
+			// If END_T add to process and stop travelling down current path
+			if vtx.Status == Status_END_T {
 				process[vtxID] = vtx
 				continue
 			}

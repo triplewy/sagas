@@ -3,11 +3,19 @@ package utils
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"io/ioutil"
 	"math"
 	"math/rand"
 	"net"
+	"strings"
 
 	"github.com/hashicorp/go-msgpack/codec"
+)
+
+// Publicly exported errors
+var (
+	ErrInvalidGraphText = errors.New("Invalid graph text")
 )
 
 // AvailableAddr gets an available address on localhost
@@ -69,4 +77,42 @@ func Uint64ToBytes(u uint64) []byte {
 	buf := make([]byte, 8)
 	binary.BigEndian.PutUint64(buf, u)
 	return buf
+}
+
+// ParseGraphFile parses a specific type of text file that contains
+// graph tests into separate graph string components
+func ParseGraphFile(filename string) ([]string, error) {
+	out, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	txt := string(out)
+	return strings.Split(txt, "-------"), nil
+}
+
+// ParseGraphText takes in a specific type of string and outputs
+// the name and graph that it contains
+func ParseGraphText(in string) (name string, graph map[string][]string, err error) {
+	graph = make(map[string][]string, 0)
+	levels := strings.Split(in, "\n")
+
+	if len(levels) == 0 {
+		err = ErrInvalidGraphText
+		return
+	}
+
+	if strings.HasPrefix(levels[0], "# ") {
+		err = ErrInvalidGraphText
+		return
+	}
+
+	name = strings.TrimPrefix(levels[0], "# ")
+
+	for i := 1; i < len(levels); i++ {
+		arr := strings.Split(levels[i], "|")
+		arr = arr[1 : len(arr)-1]
+		for j := 0; j < len(arr); j++ {
+
+		}
+	}
 }

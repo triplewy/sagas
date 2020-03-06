@@ -54,10 +54,9 @@ func (c *Coordinator) ProcessC(sagaID string, vertex Vertex) {
 	if !(vertex.Status == Status_START_T || vertex.Status == Status_END_T || vertex.Status == Status_START_C) {
 		panic(ErrInvalidSaga)
 	}
-	// If vertex status is  Status_START_T, execute Status_END_T first
+	// If vertex status is  Status_START_T should be ProcessT
 	if vertex.Status == Status_START_T {
-		c.ProcessT(sagaID, vertex)
-		return
+		panic("Should be ProcessT")
 	}
 
 	// Now vertex must either be Status_END_T or Status_START_C. Append to log

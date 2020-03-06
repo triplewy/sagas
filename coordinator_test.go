@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/triplewy/sagas/hotels"
+	"github.com/triplewy/sagas/utils"
 	"gotest.tools/assert"
 )
 
@@ -67,22 +68,22 @@ func TestCoordinatorLocal(t *testing.T) {
 			replyDag: map[string]Status{"11": Status_END_C, "20": Status_ABORT},
 		},
 		{
-			name:     "3 (1 root, 2 children) success",
+			name:     "3 1 root 2 children success",
 			dag:      map[string]map[string]struct{}{"11": {"21": struct{}{}, "31": struct{}{}}, "21": {}, "31": {}},
 			replyDag: map[string]Status{"11": Status_END_T, "21": Status_END_T, "31": Status_END_T},
 		},
 		{
-			name:     "3 (1 root, 2 children) root abort",
+			name:     "3 1 root 2 children root abort",
 			dag:      map[string]map[string]struct{}{"10": {"21": struct{}{}, "31": struct{}{}}, "21": {}, "31": {}},
 			replyDag: map[string]Status{"10": Status_ABORT, "21": Status_NOT_REACHED, "31": Status_NOT_REACHED},
 		},
 		{
-			name:     "3 (1 root, 2 children) child abort",
+			name:     "3 1 root 2 children child abort",
 			dag:      map[string]map[string]struct{}{"11": {"20": struct{}{}, "31": struct{}{}}, "20": {}, "31": {}},
 			replyDag: map[string]Status{"11": Status_END_C, "20": Status_ABORT, "31": Status_END_C},
 		},
 		{
-			name:     "3 (1 root, 2 children) 2 child abort",
+			name:     "3 1 root 2 children 2 child abort",
 			dag:      map[string]map[string]struct{}{"11": {"20": struct{}{}, "30": struct{}{}}, "20": {}, "30": {}},
 			replyDag: map[string]Status{"11": Status_END_C, "20": Status_ABORT, "30": Status_ABORT},
 		},
@@ -101,6 +102,9 @@ func TestCoordinatorLocal(t *testing.T) {
 		})
 	}
 
+	strs, err := utils.ParseGraphText("graphs.txt")
+	assert.NilError(t, err)
+	fmt.Println(len(strs), strs)
 }
 
 // Need envoy to be running for this test to work
@@ -198,7 +202,7 @@ func TestCoordinatorFailure(t *testing.T) {
 			h.BlockNetwork.Store(true)
 
 			// Start first coordinator
-			cmd := exec.Command("bin/sagas", "-user", "user5", "-room", "room5")
+			cmd := exec.Command("bin/coordinator", "-user", "user5", "-room", "room5")
 			err := cmd.Start()
 			if err != nil {
 				t.Fatal(err)
